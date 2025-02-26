@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "builds": [{
+    "src": "package.json",
+    "use": "@vercel/node"
+  }],
+  "env": {
+    "PUBLIC_SUPABASE_URL": "@public_supabase_url",
+    "PUBLIC_SUPABASE_ANON_KEY": "@public_supabase_anon_key"
+  }
+}
