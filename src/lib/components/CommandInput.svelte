@@ -49,7 +49,7 @@
                     service:services (id, name)
                 `)
                 .eq('client_id', clients[0].id)
-                .eq('service.name', parsed.serviceType);
+                .ilike('service.name', parsed.serviceType);
 
             if (serviceError) throw serviceError;
             if (!services || services.length === 0) {
@@ -73,8 +73,8 @@
             // Clear the command input and show success message
             command = '';
             result = 'Appointment scheduled successfully!';
-            // Force a page reload to refresh the appointments list
-            window.location.href = '/appointments';
+            // Use goto for navigation instead of window.location.href
+            goto('/appointments');
 
         } catch (e) {
             error = e.message;

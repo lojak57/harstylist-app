@@ -29,6 +29,12 @@
                         Services
                     </a>
                     <a
+                        href="/style-guides"
+                        class="{$page.url.pathname.startsWith('/style-guides') ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'} inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium"
+                    >
+                        Style Guides
+                    </a>
+                    <a
                         href="/payments"
                         class="{$page.url.pathname.startsWith('/payments') ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'} inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium"
                     >

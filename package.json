@@ -46,6 +46,7 @@
 	"dependencies": {
 		"@supabase/auth-helpers-sveltekit": "^0.13.0",
 		"@supabase/supabase-js": "^2.49.1",
-		"date-fns": "^4.1.0"
+		"date-fns": "^4.1.0",
+		"libphonenumber-js": "^1.12.5"
 	}
 }

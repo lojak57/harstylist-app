@@ -42,14 +42,16 @@
     }
 
     async function deleteAppointment() {
-        if (!confirm('Are you sure you want to delete this appointment?')) return;
-
         try {
             loading = true;
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Not authenticated');
+            
             const { error: deleteError } = await supabase
                 .from('appointments')
                 .delete()
-                .eq('id', $page.params.id);
+                .eq('id', $page.params.id)
+                .eq('stylist_id', user.id);
 
             if (deleteError) throw deleteError;
             goto('/appointments');

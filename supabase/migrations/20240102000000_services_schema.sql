@@ -20,6 +20,12 @@ create table if not exists public.client_services (
 -- Add RLS policies for services
 alter table public.services enable row level security;
 
+-- Drop existing policies if they exist
+drop policy if exists "Stylists can view their own services" on public.services;
+drop policy if exists "Stylists can insert their own services" on public.services;
+drop policy if exists "Stylists can update their own services" on public.services;
+drop policy if exists "Stylists can delete their own services" on public.services;
+
 create policy "Stylists can view their own services"
     on public.services for select
     using (auth.uid() = stylist_id);
@@ -38,6 +44,10 @@ create policy "Stylists can delete their own services"
 
 -- Add RLS policies for client_services
 alter table public.client_services enable row level security;
+
+-- Drop existing policies if they exist
+drop policy if exists "Stylists can view their clients' services" on public.client_services;
+drop policy if exists "Stylists can manage their clients' services" on public.client_services;
 
 create policy "Stylists can view their clients' services"
     on public.client_services for select

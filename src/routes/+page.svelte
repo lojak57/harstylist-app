@@ -7,7 +7,7 @@
     let email = '';
     let password = '';
     let error: string | null = null;
-    const emailPattern = "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}";
+    const emailPattern = "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}";
 
 
     onMount(async () => {

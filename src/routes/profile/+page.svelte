@@ -1,6 +1,9 @@
 <script lang="ts">
     import { supabase } from '$lib/supabase';
     import { onMount } from 'svelte';
+    import StyleGuideCard from '$lib/components/StyleGuideCard.svelte';
+    import ServiceCard from '$lib/components/ServiceCard.svelte';
+    import BusinessHoursSelector from '$lib/components/BusinessHoursSelector.svelte';
 
     let stylist = null;
     let loading = false;
@@ -37,69 +40,7 @@
     };
 
     // Style guide management
-    let styleGuides = [
-        {
-            id: 'classic-blowout',
-            name: 'Classic Blowout',
-            description: 'Step-by-step guide for achieving a salon-quality blowout at home',
-            steps: [
-                '1. Start with freshly washed, towel-dried hair',
-                '2. Apply heat protectant evenly throughout hair',
-                '3. Section hair into manageable parts',
-                '4. Use a round brush starting at the roots',
-                '5. Direct airflow downward to minimize frizz',
-                '6. Set with cool shot button'
-            ].join('\n')
-        },
-        {
-            id: 'beach-waves',
-            name: 'Beach Waves',
-            description: 'Create effortless, natural-looking waves',
-            steps: [
-                '1. Apply sea salt spray to damp hair',
-                '2. Scrunch hair while air drying or diffusing',
-                '3. Use a 1-inch curling iron on select pieces',
-                '4. Break up curls with fingers',
-                '5. Finish with light-hold hairspray'
-            ].join('\n')
-        },
-        {
-            id: 'sleek-straight',
-            name: 'Sleek and Straight',
-            description: 'Achieve smooth, frizz-free straight hair',
-            steps: [
-                '1. Apply smoothing serum to damp hair',
-                '2. Rough dry hair until 80% dry',
-                '3. Section hair and use flat iron',
-                '4. Apply anti-frizz oil to ends',
-                '5. Finish with shine spray'
-            ].join('\n')
-        },
-        {
-            id: 'volume-boost',
-            name: 'Volume Boost',
-            description: 'Add body and volume to fine or flat hair',
-            steps: [
-                '1. Apply volumizing mousse to roots',
-                '2. Blow dry hair upside down',
-                '3. Use velcro rollers at crown',
-                '4. Set with cool air',
-                '5. Remove rollers and style with fingers'
-            ].join('\n')
-        },
-        {
-            id: 'curly-care',
-            name: 'Curly Hair Care',
-            description: 'Enhance and maintain natural curls',
-            steps: [
-                '1. Co-wash or use sulfate-free shampoo',
-                '2. Apply leave-in conditioner',
-                '3. Use praying hands method for product',
-                '4. Scrunch with microfiber towel',
-                '5. Air dry or diffuse on low heat'
-            ].join('\n')
-        }
-    ];
+    let styleGuides = [];
 
     // Product recommendations
     let recommendedProducts = [
@@ -161,6 +102,16 @@
             if (stylist.avatar_url) {
                 imageUrl = stylist.avatar_url;
             }
+
+            // Load stylist's style guides
+            const { data: guidesData, error: guidesError } = await supabase
+                .from('style_guides')
+                .select('*')
+                .eq('stylist_id', user.id)
+                .order('created_at', { ascending: false });
+
+            if (guidesError) throw guidesError;
+            styleGuides = guidesData;
         } catch (e) {
             error = e.message;
         } finally {
@@ -293,28 +244,43 @@
 
                             <!-- Business Hours -->
                             <div>
-                                <h3 class="text-sm font-medium text-gray-700">Business Hours</h3>
-                                <div class="mt-2 space-y-2">
-                                    {#each businessInfo.businessHours as { day, hours }, i}
-                                        <div class="flex items-center justify-between">
-                                            <span class="text-sm text-gray-500">{day}</span>
-                                            <input type="text" bind:value={businessInfo.businessHours[i].hours} class="block w-48 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                                        </div>
-                                    {/each}
-                                </div>
+                                <BusinessHoursSelector 
+                                    bind:businessHours={businessInfo.businessHours} 
+                                    on:change={({detail}) => businessInfo.businessHours = detail.businessHours}
+                                />
                             </div>
 
                             <!-- Services & Pricing -->
                             <div>
                                 <h3 class="text-sm font-medium text-gray-700">Services & Pricing</h3>
-                                <div class="mt-2 space-y-2">
+                                <div class="mt-2 space-y-4">
                                     {#each businessInfo.services as service, i}
-                                        <div class="grid grid-cols-3 gap-4">
-                                            <input type="text" bind:value={businessInfo.services[i].name} placeholder="Service name" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                                            <input type="number" bind:value={businessInfo.services[i].price} placeholder="Price" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                                            <input type="text" bind:value={businessInfo.services[i].duration} placeholder="Duration" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                                        </div>
+                                        <ServiceCard 
+                                            {service} 
+                                            showDelete={businessInfo.services.length > 1}
+                                            onDelete={() => {
+                                                businessInfo.services = businessInfo.services.filter((_, index) => index !== i);
+                                            }}
+                                        />
                                     {/each}
+                                    
+                                    <button 
+                                        type="button" 
+                                        on:click={() => {
+                                            businessInfo.services = [...businessInfo.services, { 
+                                                name: 'New Service', 
+                                                price: 0, 
+                                                duration: '30 min',
+                                                description: ''
+                                            }];
+                                        }}
+                                        class="mt-2 inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                    >
+                                        <svg class="-ml-0.5 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        Add Service
+                                    </button>
                                 </div>
                             </div>
 
@@ -339,11 +305,7 @@
                         <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
                             <div class="space-y-4">
                                 {#each styleGuides as guide}
-                                    <div class="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0">
-                                        <h3 class="text-sm font-medium text-gray-900">{guide.name}</h3>
-                                        <p class="mt-1 text-sm text-gray-500">{guide.description}</p>
-                                        <div class="mt-2 text-sm text-gray-700 whitespace-pre-line">{guide.steps}</div>
-                                    </div>
+                                    <StyleGuideCard {guide} compact={true} />
                                 {/each}
                             </div>
                         </div>
