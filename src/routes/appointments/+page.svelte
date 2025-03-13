@@ -2,10 +2,11 @@
     import { supabase } from '$lib/supabase';
     import CommandInput from '$lib/components/CommandInput.svelte';
     import { onMount } from 'svelte';
-    import { format } from 'date-fns';
+    import { format, parseISO, addMinutes } from 'date-fns';
     import type { Database } from '$lib/supabase';
     import Calendar from '$lib/components/Calendar.svelte';
     import { goto } from '$app/navigation';
+    // We'll add toast functionality later after installing the package
 
     type Appointment = Database['public']['Tables']['appointments']['Row'];
     type Client = Database['public']['Tables']['clients']['Row'];
@@ -30,7 +31,8 @@
     let endTime = '';
     let notes = '';
     let showForm = false;
-    let showList = true;
+    let showList = false; // Changed to false to show calendar by default
+    let showCalendar = true; // New flag to toggle calendar view
 
     onMount(async () => {
         await Promise.all([loadAppointments(), loadClients()]);
@@ -137,8 +139,10 @@
             showForm = false;
 
             await loadAppointments();
+            alert('Appointment created successfully');
         } catch (e: any) {
             error = e.message;
+            alert(`Error: ${e.message}`);
         } finally {
             loading = false;
         }
@@ -160,19 +164,94 @@
             if (deleteError) throw deleteError;
 
             await loadAppointments();
+            alert('Appointment deleted successfully');
         } catch (e: any) {
             error = e.message;
+            alert(`Error: ${e.message}`);
         } finally {
             loading = false;
+        }
+    }
+
+    // New function to handle appointment moves via drag-and-drop
+    async function handleAppointmentMoved(event: CustomEvent) {
+        try {
+            const { appointment, newStartTime, newEndTime } = event.detail;
+            console.log('Appointment moved:', appointment.id, newStartTime, newEndTime);
+            
+            // Update the appointment in Supabase
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Not authenticated');
+            
+            const { error: updateError } = await supabase
+                .from('appointments')
+                .update({
+                    start_time: newStartTime,
+                    end_time: newEndTime
+                })
+                .eq('id', appointment.id)
+                .eq('stylist_id', user.id);
+
+            if (updateError) {
+                console.error('Error updating appointment:', updateError);
+                throw updateError;
+            }
+            
+            // Update the local appointment data without a full reload
+            appointments = appointments.map(a => {
+                if (a.id === appointment.id) {
+                    return {
+                        ...a,
+                        start_time: newStartTime,
+                        end_time: newEndTime
+                    };
+                }
+                return a;
+            });
+            
+            // Create a simple toast notification
+            const toast = document.createElement('div');
+            toast.textContent = 'Appointment rescheduled';
+            toast.style.cssText = 'position: fixed; bottom: 20px; right: 20px; background-color: #10B981; color: white; padding: 12px 20px; border-radius: 4px; z-index: 100; box-shadow: 0 2px 10px rgba(0,0,0,0.1);';
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                if (document.body.contains(toast)) {
+                    document.body.removeChild(toast);
+                }
+            }, 3000);
+        } catch (e: any) {
+            console.error('Error in handleAppointmentMoved:', e);
+            // Show error toast
+            const errorToast = document.createElement('div');
+            errorToast.textContent = `Error: ${e.message}`;
+            errorToast.style.cssText = 'position: fixed; bottom: 20px; right: 20px; background-color: #EF4444; color: white; padding: 12px 20px; border-radius: 4px; z-index: 100; box-shadow: 0 2px 10px rgba(0,0,0,0.1);';
+            document.body.appendChild(errorToast);
+            
+            setTimeout(() => {
+                if (document.body.contains(errorToast)) {
+                    document.body.removeChild(errorToast);
+                }
+            }, 3000);
+        }
+    }
+    
+    // Function to handle appointment clicks in the calendar
+    function handleAppointmentClick(event: CustomEvent<{id: string}>) {
+        const appointmentId = event.detail.id;
+        if (appointmentId) {
+            goto(`/appointments/${appointmentId}`);
         }
     }
 
     function formatDateTime(dateStr: string) {
         return format(new Date(dateStr), 'MMM d, yyyy h:mm a');
     }
+    
     $: if (selectedClientId) {
         loadClientServices(selectedClientId);
     }
+    
     function parseDuration(durationStr: string): number {
         let totalMinutes = 0;
         const hourMatch = durationStr.match(/(\d+)\s*hour/i);
@@ -199,14 +278,9 @@
         });
     
         const startDate = new Date(startTime);
-        const endDate = new Date(startDate.getTime() + totalMinutes * 60000);
-        endTime = endDate.toISOString().slice(0, 16);
+        endTime = format(addMinutes(startDate, totalMinutes), "yyyy-MM-dd'T'HH:mm");
     }
     
-    $: if (startTime || selectedServices) {
-        calculateEndTime();
-    }
-
     function toggleService(serviceId: string) {
         if (selectedServices.includes(serviceId)) {
             selectedServices = selectedServices.filter(id => id !== serviceId);
@@ -215,12 +289,9 @@
         }
         calculateEndTime();
     }
-
-    function handleAppointmentClick(event: CustomEvent<{id: string}>) {
-        const appointmentId = event.detail.id;
-        if (appointmentId) {
-            goto(`/appointments/${appointmentId}`);
-        }
+    
+    $: if (startTime && selectedServices.length > 0) {
+        calculateEndTime();
     }
 </script>
 
@@ -243,7 +314,8 @@
                 </button>
                 <a
                     href="/appointments/new"
-                    class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                    class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
@@ -388,7 +460,11 @@
         {#if !showList}
             <div class="mt-6 overflow-hidden bg-white shadow-sm ring-1 ring-gray-900/5 sm:rounded-xl">
                 <div class="px-4 py-5 sm:p-6">
-                    <Calendar {appointments} on:appointmentClick={handleAppointmentClick} />                    
+                    <Calendar 
+                        bind:appointments 
+                        on:appointmentMoved={handleAppointmentMoved} 
+                        on:appointmentClick={handleAppointmentClick} 
+                    />
                 </div>
             </div>
         {/if}
@@ -475,7 +551,7 @@
                                                                 class="text-red-600 hover:text-red-900 flex items-center gap-1"
                                                             >
                                                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-                                                                    <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 1-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 1-7.5 0" />
                                                                 </svg>
                                                                 Delete
                                                             </button>
