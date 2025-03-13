@@ -1,15 +1,19 @@
 <script lang="ts">
     import { fade } from 'svelte/transition';
     
-    export let guide = {
-        id: '',
-        name: '',
-        description: '',
-        steps: '',
-        recommended_products: []
+    type StyleGuide = {
+        id: string;
+        name: string;
+        description: string;
+        steps: string;
+        recommended_products: string[];
+        stylist_id?: string;
+        created_at?: string;
+        image_url?: string;
     };
-    export let showDelete = false;
-    export let onDelete = () => {};
+    
+    export let guide: StyleGuide;
+    export let onDelete: (id: string) => void;
     export let compact = false;
 </script>
 
@@ -17,16 +21,15 @@
     <div class="px-4 py-5 sm:px-6 bg-gradient-to-r from-indigo-50 to-white">
         <div class="flex items-center justify-between">
             <h3 class="text-lg font-medium text-gray-900 hover:text-indigo-600 transition-colors duration-200">{guide.name}</h3>
-            {#if showDelete}
-                <button
-                    on:click={() => onDelete(guide.id)}
-                    class="text-gray-400 hover:text-red-500 transition-colors duration-200">
-                    <span class="sr-only">Delete</span>
-                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                </button>
-            {/if}
+            <button
+                on:click={() => onDelete(guide.id)}
+                class="text-gray-400 hover:text-red-500 transition-colors duration-200"
+                aria-label="Delete style guide"
+            >
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            </button>
         </div>
         <p class="mt-2 text-sm text-gray-500">{guide.description}</p>
     </div>

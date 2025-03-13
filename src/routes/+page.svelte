@@ -28,7 +28,7 @@
 
             if (signInError) throw signInError;
             goto('/clients');
-        } catch (e) {
+        } catch (e: any) {
             error = e.message;
         } finally {
             loading = false;
@@ -46,23 +46,35 @@
 
             if (signUpError) throw signUpError;
 
-            // Create stylist record
-            if (data.user) {
-                const { error: stylistError } = await supabase
-                    .from('stylists')
-                    .insert([{
-                        id: data.user.id,
+            // Create stylist and client records after successful signup
+            if (data && data.user) {
+                // Create client record if email exists
+                if (data.user.email) {
+                    await supabase.from('clients').insert([{
+                        stylist_id: data.user.id,
                         email: data.user.email,
                         name: data.user.email.split('@')[0]
                     }]);
-
-                if (stylistError) {
-                    console.error('Error creating stylist:', stylistError);
                 }
-            }
 
-            error = 'Check your email for the confirmation link';
-        } catch (e) {
+                // Create stylist record
+                if (data.user) {
+                    const { error: stylistError } = await supabase
+                        .from('stylists')
+                        .insert([{
+                            id: data.user.id,
+                            email: data.user.email,
+                            name: data.user.email.split('@')[0]
+                        }]);
+
+                    if (stylistError) {
+                        console.error('Error creating stylist:', stylistError);
+                    }
+                }
+
+                error = 'Check your email for the confirmation link';
+            }
+        } catch (e: any) {
             error = e.message;
         } finally {
             loading = false;

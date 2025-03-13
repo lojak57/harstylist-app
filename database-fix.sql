@@ -1,0 +1,1 @@
+ALTER TABLE stylists ADD COLUMN IF NOT EXISTS business_info JSONB;
