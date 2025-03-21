@@ -197,11 +197,34 @@
     });
 
     async function loadServices(): Promise<void> {
-        const { data, error } = await supabase.from('services').select('id, name, description');
-        if (error) {
-            console.error('Error fetching services:', error);
-        } else {
-            availableServices = data || [];
+        try {
+            // Get the current user
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            
+            if (userError) {
+                console.error('Error getting current user:', userError);
+                return;
+            }
+            
+            if (!user) {
+                console.error('No authenticated user found');
+                return;
+            }
+            
+            // Fetch only services for the current stylist
+            const { data, error } = await supabase
+                .from('services')
+                .select('id, name, description')
+                .eq('stylist_id', user.id);
+                
+            if (error) {
+                console.error('Error fetching services:', error);
+            } else {
+                availableServices = data || [];
+                console.log('Loaded services for stylist:', availableServices.length);
+            }
+        } catch (err) {
+            console.error('Error in loadServices:', err);
         }
     }
 

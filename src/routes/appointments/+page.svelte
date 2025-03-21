@@ -671,9 +671,18 @@
 
     async function fetchServices() {
         try {
+            // Get the current user first
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                console.error('No authenticated user found');
+                return;
+            }
+
+            // Fetch only services for the current stylist
             const { data, error: fetchError } = await supabase
                 .from('services')
-                .select('*');
+                .select('*')
+                .eq('stylist_id', user.id);
 
             if (fetchError) throw fetchError;
             services = data;

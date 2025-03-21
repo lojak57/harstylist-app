@@ -58,11 +58,14 @@
 
     type Stylist = {
         id: string;
-        name: string;
         email: string;
-        avatar_url: string | null;
-        business_info: any;
-        created_at: string;
+        name: string;
+        salon_name?: string;
+        avatar_url?: string;
+        business_info?: any;
+        business_hours?: any;
+        registration_completed?: boolean;
+        registration_completed_at?: string;
     };
 
     // Stylist services
@@ -185,22 +188,78 @@
     async function loadStylistProfile() {
         try {
             loading = true;
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
+            error = null;
+            
+            // Get current user
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            
+            if (userError) {
+                console.error('Auth error:', userError);
+                throw new Error(`Authentication error: ${userError.message}`);
+            }
+            
+            if (!user) {
+                console.error('No authenticated user found');
+                throw new Error('Not authenticated. Please sign in again.');
+            }
 
+            console.log('Current user:', user.id);
+            
+            // Check if stylist record exists
             const { data, error: fetchError } = await supabase
                 .from('stylists')
                 .select('*')
                 .eq('id', user.id)
                 .single();
 
-            if (fetchError) throw fetchError;
-            stylist = data;
+            if (fetchError) {
+                console.error('Error fetching stylist:', fetchError);
+                
+                // If the error is that no rows were returned, it means the stylist doesn't exist yet
+                if (fetchError.code === 'PGRST116') {
+                    console.log('No stylist record found, creating one...');
+                    
+                    // Create a basic stylist record
+                    const { data: newStylist, error: createError } = await supabase
+                        .from('stylists')
+                        .insert({
+                            id: user.id,
+                            email: user.email,
+                            name: user.email ? user.email.split('@')[0] : 'New Stylist'
+                        })
+                        .select();
+                    
+                    if (createError) {
+                        console.error('Error creating stylist:', createError);
+                        throw new Error(`Failed to create stylist profile: ${createError.message}`);
+                    }
+                    
+                    if (newStylist && newStylist.length > 0) {
+                        stylist = newStylist[0];
+                        console.log('Created new stylist record:', stylist);
+                    } else {
+                        throw new Error('Failed to create stylist profile');
+                    }
+                } else {
+                    throw new Error(`Database error: ${fetchError.message}`);
+                }
+            } else {
+                stylist = data;
+                console.log('Loaded existing stylist:', stylist);
+            }
             
             // Load business info if exists
             if (stylist && stylist.business_info) {
                 businessInfo = { ...businessInfo, ...stylist.business_info };
+                console.log('Loaded business info:', businessInfo);
             }
+            
+            // Load business hours if exists
+            if (stylist && stylist.business_hours) {
+                businessInfo.businessHours = stylist.business_hours;
+                console.log('Loaded business hours:', businessInfo.businessHours);
+            }
+            
             if (stylist && stylist.avatar_url) {
                 imageUrl = stylist.avatar_url;
             }
@@ -212,8 +271,12 @@
                 .eq('stylist_id', user.id)
                 .order('created_at', { ascending: false });
 
-            if (guidesError) throw guidesError;
-            styleGuides = guidesData;
+            if (guidesError) {
+                console.error('Error loading style guides:', guidesError);
+            } else {
+                styleGuides = guidesData;
+                console.log('Loaded style guides:', styleGuides?.length || 0);
+            }
 
             // Load stylist's services
             const { data: servicesData, error: servicesError } = await supabase
@@ -221,15 +284,19 @@
                 .select('*')
                 .eq('stylist_id', user.id);
 
-            if (servicesError) throw servicesError;
-            // Make sure all services have a description property
-            services = (servicesData || []).map(service => ({
-                ...service,
-                description: service.description || ''
-            }));
-        } catch (error: any) {
-            console.error('Error loading profile:', error);
-            error = error.message || 'Failed to load profile';
+            if (servicesError) {
+                console.error('Error loading services:', servicesError);
+            } else {
+                // Make sure all services have a description property
+                services = (servicesData || []).map(service => ({
+                    ...service,
+                    description: service.description || ''
+                }));
+                console.log('Loaded services:', services?.length || 0);
+            }
+        } catch (e: any) {
+            console.error('Error loading profile:', e);
+            error = e.message || 'Failed to load profile';
         } finally {
             loading = false;
         }
@@ -290,12 +357,14 @@
             
             console.log('Saving business info:', businessInfo);
             
-            // Store the entire businessInfo object as JSON in a jsonb column
+            // Store the business info and business hours separately
             const { error: updateError } = await supabase
                 .from('stylists')
                 .update({
                     // Use the business_info JSON column to store all the data
-                    business_info: businessInfo
+                    business_info: businessInfo,
+                    // Save business hours separately
+                    business_hours: businessInfo.businessHours
                 })
                 .eq('id', stylist.id);
 
@@ -390,6 +459,22 @@
             loading = false;
         }
     }
+
+    // Sign out function
+    async function handleSignOut() {
+        try {
+            loading = true;
+            const { error } = await supabase.auth.signOut();
+            if (error) throw error;
+            // Redirect to login page after sign out
+            window.location.href = '/';
+        } catch (err) {
+            console.error('Error signing out:', err);
+            error = 'Failed to sign out. Please try again.';
+        } finally {
+            loading = false;
+        }
+    }
 </script>
 
 <div class="min-h-screen bg-gray-50">
@@ -410,6 +495,9 @@
             <div class="mt-4 p-4 text-sm text-red-700 bg-red-100 rounded-lg" transition:fade>{error}</div>
         {/if}
 
+        <!-- Debug information -->
+        <!-- Removed Debug Information Section -->
+
         {#if stylist}
             <div class="mt-6 md:flex md:items-center md:justify-between md:space-x-5">
                 <div class="flex items-start space-x-5">
@@ -420,7 +508,7 @@
                             <label class="absolute bottom-0 right-0 h-8 w-8 rounded-full bg-white p-1 shadow-lg cursor-pointer">
                                 <input type="file" class="hidden" accept="image/*" on:change={handleImageUpload} />
                                 <svg class="h-6 w-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0118.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                                 </svg>
                             </label>
@@ -464,7 +552,7 @@
                                 >
                                     <span class="flex items-center">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 016 0z" />
                                         </svg>
                                         Business Hours
                                     </span>
@@ -489,7 +577,7 @@
                             {#if activeTab === 'basic'}
                                 <div in:fade={{ duration: 200 }} class="space-y-6">
                                     <div class="bg-indigo-50 p-3 rounded-md mb-6">
-                                        <p class="text-sm text-indigo-800">💡 Complete your business profile to help clients find and connect with you more easily.</p>
+                                        <p class="text-sm text-indigo-800"> Complete your business profile to help clients find and connect with you more easily.</p>
                                     </div>
                                     
                                     <!-- Contact Information -->
@@ -607,7 +695,7 @@
                             {#if activeTab === 'social'}
                                 <div in:fade={{ duration: 200 }} class="space-y-6">
                                     <div class="bg-indigo-50 p-3 rounded-md mb-6">
-                                        <p class="text-sm text-indigo-800">💁‍♀️ Connecting your social media accounts helps clients see your latest work and follow you online!</p>
+                                        <p class="text-sm text-indigo-800"> Connecting your social media accounts helps clients see your latest work and follow you online!</p>
                                     </div>
                                     
                                     <div class="grid grid-cols-1 gap-6">
@@ -659,19 +747,19 @@
                                             <h4 class="text-sm font-medium text-gray-800">Benefits of Social Media</h4>
                                             <ul class="mt-2 space-y-2 text-sm text-gray-600">
                                                 <li class="flex items-start">
-                                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
                                                     </svg>
                                                     Showcase your portfolio with stunning visuals
                                                 </li>
                                                 <li class="flex items-start">
-                                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
                                                     </svg>
                                                     Attract new clients through social discovery
                                                 </li>
                                                 <li class="flex items-start">
-                                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
                                                     </svg>
                                                     Build relationships with existing clients
@@ -691,7 +779,7 @@
                                     disabled={loading}
                                 >
                                     {#if loading}
-                                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
@@ -764,5 +852,32 @@
                 </div>
             </div>
         {/if}
+        
+        <!-- Sign Out Section -->
+        <div class="max-w-3xl mx-auto mt-12 mb-8">
+            <div class="bg-white shadow sm:rounded-lg overflow-hidden">
+                <div class="px-4 py-5 sm:px-6 bg-gradient-to-r from-red-500 to-red-700">
+                    <h2 class="text-lg font-medium leading-6 text-white">Account Settings</h2>
+                    <p class="mt-1 text-sm text-red-100">Manage your account access</p>
+                </div>
+                <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+                    <div class="bg-red-50 p-3 rounded-md mb-6">
+                        <p class="text-sm text-red-800"> Signing out will end your current session. You'll need to log in again to access your account.</p>
+                    </div>
+                    <div class="flex justify-center">
+                        <button 
+                            on:click={handleSignOut}
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={loading}
+                        >
+                            <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                            Sign Out
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
