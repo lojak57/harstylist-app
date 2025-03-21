@@ -1,522 +1,629 @@
 <script lang="ts">
-    import { onMount, createEventDispatcher } from 'svelte';
-    import { format, addDays, startOfWeek, isSameDay, isSameMonth, differenceInMinutes, addMinutes, parseISO, isToday, getDay, getHours, getMinutes } from 'date-fns';
-    import type { Database } from '$lib/supabase';
-    
-    type Appointment = Database['public']['Tables']['appointments']['Row'] & {
-        client?: Database['public']['Tables']['clients']['Row']
-    };
-    
-    const dispatch = createEventDispatcher();
-    
-    export let appointments: Appointment[] = [];
-    export let currentDate = new Date();
+    import { onMount, createEventDispatcher, tick } from 'svelte';
+    import { DateTime } from 'luxon';
+    import { browser } from '$app/environment';
+    import { parseDbDate, getHour, getMinutes, getCalendarDayIndex, getMinutesFromBusinessStart, getDurationMinutes, debugDate, parseDateToLuxon, formatSalonTime, formatHour } from '$lib/utils/timeUtils';
+    import type { Appointment } from '$lib/types';
+    import AppointmentCard from './AppointmentCard.svelte';
+
+    const dispatch = createEventDispatcher<{
+        appointmentMoved: { appointment: Appointment; newStartTime: string; newEndTime: string };
+        editAppointment: { id: string };
+        createAppointment: { startDate: DateTime };
+        appointmentClick: { appointment: Appointment };
+    }>();
+
+    export let initialDate = new Date();
     export let view: 'month' | 'week' | 'day' = 'week';
-    export let businessHours = { start: 9, end: 17 }; // Default 9 AM to 5 PM
-    
-    // Canvas overlay for drag and drop
+    export let appointments: Appointment[] = [];
+    export let businessHours = { 
+        start: 8, // Start at 8:00 AM 
+        end: 18   // End at 6:00 PM
+    };
+
+    let currentDate = DateTime.fromJSDate(initialDate);
+    let selectedDate = DateTime.fromJSDate(initialDate);
+    let visibleDays: DateTime[] = [];
+    let dayColumns: Array<{ date: DateTime, appointments: Appointment[] }> = [];
+    let eventDetails: { x: number, y: number, appointment: Appointment } | null = null;
+    let weekView: HTMLElement;
     let calendarContainer: HTMLElement;
-    let dragOverlay: HTMLDivElement | null = null;
-    let overlayAppointment: HTMLDivElement | null = null;
+
+    // Salon timezone from our timeUtils
+    const SALON_TIMEZONE = 'America/Denver'; // This should match what's in timeUtils.ts
+
+    // State for expanded appointment (modal for showing details)
+    let expandedAppointment: Appointment | null = null;
+    let expandedAppointmentId: string | null = null;
+
+    // Update visible days when view or selected date changes
+    $: if (selectedDate && view) {
+        updateVisibleDays();
+    }
+
+    // Update dayColumns whenever visibleDays or appointments change
+    $: if (visibleDays.length > 0 && appointments) {
+        updateDayColumns();
+    }
+
+    function updateVisibleDays() {
+        console.log('Updating visible days for view:', view);
+        visibleDays = getVisibleDays(selectedDate, view);
+    }
+
+    // Get days that should be visible based on current view and selected date
+    function getVisibleDays(date: DateTime, viewType: 'month' | 'week' | 'day'): DateTime[] {
+        const days: DateTime[] = [];
+        
+        if (viewType === 'day') {
+            // Day view - just the selected date
+            days.push(date);
+        } 
+        else if (viewType === 'week') {
+            // Week view - get all days in the week
+            // Start from Monday (Luxon weekday=1) of the current week
+            let weekStart = date.startOf('week');
+            
+            // Add each day of the week
+            for (let i = 0; i < 7; i++) {
+                days.push(weekStart.plus({ days: i }));
+            }
+        } 
+        else { // month view
+            // Month view - Grid of dates for the month
+            // First get the start of the month
+            const monthStart = date.startOf('month');
+            
+            // Then find the Monday before or on the start of the month
+            // Luxon: 1=Monday, 7=Sunday
+            let weekStart = monthStart;
+            while (weekStart.weekday !== 1) {
+                weekStart = weekStart.minus({ days: 1 });
+            }
+            
+            // Add 42 days (6 weeks) to ensure we cover the full month plus surrounding dates
+            for (let i = 0; i < 42; i++) {
+                days.push(weekStart.plus({ days: i }));
+            }
+        }
+        
+        return days;
+    }
+
+    // Function to navigate dates in the calendar
+    function navigateDate(direction: 'prev' | 'next' | 'today') {
+        if (direction === 'today') {
+            selectedDate = DateTime.now();
+        } else if (direction === 'prev') {
+            if (view === 'day') {
+                selectedDate = selectedDate.minus({ days: 1 });
+            } else if (view === 'week') {
+                selectedDate = selectedDate.minus({ weeks: 1 });
+            } else { // month
+                selectedDate = selectedDate.minus({ months: 1 });
+            }
+        } else if (direction === 'next') {
+            if (view === 'day') {
+                selectedDate = selectedDate.plus({ days: 1 });
+            } else if (view === 'week') {
+                selectedDate = selectedDate.plus({ weeks: 1 });
+            } else { // month
+                selectedDate = selectedDate.plus({ months: 1 });
+            }
+        }
+        updateVisibleDays();
+    }
+
+    function updateDayColumns() {
+        // Reset day columns
+        dayColumns = [];
+
+        // Create a column for each visible day
+        visibleDays.forEach(day => {
+            // Find appointments for this day
+            const dayAppointments = appointments.filter(appointment => {
+                try {
+                    const appointmentDate = parseDateToLuxon(appointment.start_time);
+                    // Check if the appointment date matches the current day (comparing in same timezone)
+                    return appointmentDate.hasSame(day, 'day');
+                } catch (error) {
+                    console.error('Error parsing appointment date:', error);
+                    return false;
+                }
+            });
+
+            dayColumns.push({
+                date: day,
+                appointments: dayAppointments
+            });
+        });
+    }
+
+    // Function to calculate the style for an appointment based on its start and end time
+    function getAppointmentStyle(appointment: Appointment, dayIndex?: number): string {
+        try {
+            const startDate = parseDateToLuxon(appointment.start_time);
+            const endDate = parseDateToLuxon(appointment.end_time);
+            
+            if (view === 'week' || view === 'day') {
+                // Calculate time position (vertical positioning)
+                const dayStart = businessHours.start;
+                const startHour = startDate.hour;
+                const startMinute = startDate.minute;
+                
+                // Minutes since start of business day
+                const minutesSinceStart = (startHour - dayStart) * 60 + startMinute;
+                
+                // Each hour is 60px tall
+                const pixelsPerMinute = 60 / 60; // 1px per minute
+                const topPosition = minutesSinceStart * pixelsPerMinute;
+                
+                // Duration in minutes for height calculation
+                const durationMinutes = endDate.diff(startDate, 'minutes').minutes;
+                const height = Math.max(30, durationMinutes * pixelsPerMinute); // Minimum 30px
+                
+                if (view === 'week') {
+                    // Align with the left margin of the day column
+                    // No need for complex calculation, the parent element already has the correct position
+                    return `position: absolute; top: ${topPosition}px; height: ${height}px; left: 0;`;
+                } else { // day view
+                    return `position: absolute; top: ${topPosition}px; height: ${height}px; left: 0;`;
+                }
+            } else {
+                // Month view doesn't use this positioning
+                return '';
+            }
+        } catch (error) {
+            console.error('Error calculating appointment style:', error);
+            return 'display: none;';
+        }
+    }
+
+    // Check if appointment is visible in the current week view
+    function isVisibleInWeekView(appointment: Appointment): boolean {
+        try {
+            const appointmentDate = parseDateToLuxon(appointment.start_time);
+            return visibleDays.some(day => day.hasSame(appointmentDate, 'day'));
+        } catch (error) {
+            console.error('Error checking if appointment is visible in week view:', error);
+            return false;
+        }
+    }
+
+    // Check if appointment is visible in the current day view
+    function isVisibleInDayView(appointment: Appointment): boolean {
+        try {
+            if (!visibleDays.length) return false;
+            const appointmentDate = parseDateToLuxon(appointment.start_time);
+            return appointmentDate.hasSame(visibleDays[0], 'day');
+        } catch (error) {
+            console.error('Error checking if appointment is visible in day view:', error);
+            return false;
+        }
+    }
+
+    // Handle clicking on a time slot to potentially create a new appointment
+    function handleTimeClick(event: MouseEvent | KeyboardEvent, day: DateTime, hour: number) {
+        // Different handling for mouse vs keyboard events
+        let startTime: DateTime;
+        
+        if (event instanceof MouseEvent) {
+            // For mouse clicks, calculate the precise minute based on click position
+            const rect = (event.target as HTMLElement).getBoundingClientRect();
+            const y = event.clientY - rect.top;
+            
+            // Convert position to minutes (assuming 60px = 60 minutes)
+            const minuteRatio = y / 60;
+            const minutes = Math.floor(minuteRatio * 60);
+            
+            // Create DateTime for the clicked time
+            startTime = day.set({ hour, minute: minutes });
+        } else {
+            // For keyboard events (Enter key), use the start of the hour
+            startTime = day.set({ hour, minute: 0 });
+        }
+        
+        // End time is 1 hour after start by default
+        const endTime = startTime.plus({ hours: 1 });
+        
+        console.log(`Time clicked: ${startTime.toFormat('yyyy-MM-dd HH:mm')} - ${endTime.toFormat('HH:mm')}`);
+        
+        // Dispatch the create appointment event
+        dispatch('createAppointment', { startDate: startTime });
+    }
+
+    // Calculate percentage for positioning based on minutes
+    function getMinutePercentage(minutes: number): number {
+        return (minutes / 60) * 100;
+    }
+
+    // Handle appointment clicked
+    async function handleAppointmentClick(appointment: Appointment, event: MouseEvent) {
+        if (isDragging) return;
+        event.stopPropagation();
+        event.preventDefault();
+
+        console.log('Appointment clicked:', appointment);
+        dispatch('appointmentClick', { appointment });
+    }
+
+    // Drag and drop functionality
     let isDragging = false;
     let draggedAppointment: Appointment | null = null;
-    let startY = 0;
-    let currentY = 0;
+    let overlayAppointment: Appointment | null = null;
+    let dragOverlay: HTMLElement | null = null;
+    let currentX = 0;
     let heightPerMinute = 1; // Will be calculated based on business hours
     let originalTop = 0;
-    
-    $: dayStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-    $: daysToShow = view === 'month' ? 35 : view === 'week' ? 7 : 1;
-    $: timeSlots = Array.from({ length: (businessHours.end - businessHours.start) * 4 }, (_, i) => {
-        const hour = Math.floor(i / 4) + businessHours.start;
-        const minute = (i % 4) * 15;
-        return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-    });
-    
-    // Create the overlay element for dragging
-    function createDragOverlay() {
-        if (dragOverlay) return;
-        
-        // Create the semi-transparent overlay for the entire calendar
-        dragOverlay = document.createElement('div');
-        dragOverlay.className = 'drag-overlay';
-        dragOverlay.style.cssText = `
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 50;
-            cursor: grabbing;
-            display: none;
-        `;
-        
-        // Create the visual element that represents the appointment being dragged
-        overlayAppointment = document.createElement('div');
-        overlayAppointment.className = 'overlay-appointment';
-        overlayAppointment.style.cssText = `
-            position: absolute;
-            background-color: rgba(99, 102, 241, 0.6);
-            border-radius: 0.375rem;
-            padding: 0.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            pointer-events: none;
-        `;
-        
-        dragOverlay.appendChild(overlayAppointment);
-        
-        // Add the overlay to the calendar container
-        if (calendarContainer) {
-            calendarContainer.appendChild(dragOverlay);
-            
-            // Set up event listeners for the overlay
-            dragOverlay.addEventListener('mousemove', handleDragMove);
-            dragOverlay.addEventListener('touchmove', handleDragMove, { passive: false });
-            dragOverlay.addEventListener('mouseup', handleDragEnd);
-            dragOverlay.addEventListener('touchend', handleDragEnd);
-        }
-    }
-    
-    // Computed to only show appointments for the current view
-    $: visibleAppointments = appointments.filter(appointment => {
-        const appointmentStart = parseISO(appointment.start_time);
-        if (view === 'month') {
-            // TODO: Implement month view filtering
-            return true;
-        } else if (view === 'week') {
-            const startOfCurrentWeek = startOfWeek(currentDate, { weekStartsOn: 1 });
-            const endOfCurrentWeek = addDays(startOfCurrentWeek, 6);
-            return appointmentStart >= startOfCurrentWeek && appointmentStart <= endOfCurrentWeek;
-        } else { // day view
-            return isSameDay(appointmentStart, currentDate);
-        }
-    });
-    
-    function getDayColumn(day: Date) {
-        return (getDay(day) + 6) % 7; // Convert to Monday = 0, Sunday = 6
-    }
-    
-    // Calculate the position and size of an appointment based on its time
-    function getAppointmentStyle(appointment: Appointment) {
-        const start = new Date(appointment.start_time);
-        const end = new Date(appointment.end_time);
-        
-        const startHour = getHours(start);
-        const startMinute = getMinutes(start);
-        const durationMinutes = differenceInMinutes(end, start);
-        
-        const minutesFromBusinessStart = (startHour - businessHours.start) * 60 + startMinute;
-        const top = minutesFromBusinessStart * heightPerMinute;
-        const height = durationMinutes * heightPerMinute;
-        
-        return `top: ${top}px; height: ${height}px;`;
-    }
-    
-    function getColumnForDate(date: Date) {
-        if (view === 'day') return 0;
-        const dayColumn = getDayColumn(date);
-        return view === 'week' ? dayColumn : (Math.floor(dayColumn / 7) * 7) + (dayColumn % 7);
-    }
-    
-    // Start dragging an appointment
+    let originalLeft = 0;
+    let dayColumnWidth = 0;
+
+    // For drag and drop
     function handleDragStart(appointment: Appointment, event: MouseEvent | TouchEvent) {
+        if (!browser) return;
+        
         event.preventDefault();
-        
-        if (!appointment) return;
-        
-        // Create the overlay if it doesn't exist
-        createDragOverlay();
-        
-        // Check if overlay was created successfully
-        if (!dragOverlay || !overlayAppointment) {
-            console.error('Failed to create drag overlay');
-            return;
-        }
-        
-        // Store the appointment we're dragging
+
+        // Set up dragging state
+        isDragging = true;
         draggedAppointment = appointment;
         
-        // Set the initial mouse position
-        if (event instanceof MouseEvent) {
-            startY = event.clientY;
-            currentY = event.clientY;
-        } else {
-            startY = event.touches[0].clientY;
-            currentY = event.touches[0].clientY;
-        }
+        // Create a clone of the appointment for the overlay
+        overlayAppointment = {...appointment};
         
-        // Calculate height per minute based on time grid
-        const timeGrid = document.querySelector('.time-grid');
-        if (timeGrid) {
-            const gridHeight = timeGrid.clientHeight;
-            const totalMinutes = (businessHours.end - businessHours.start) * 60;
-            heightPerMinute = gridHeight / totalMinutes;
-        }
+        // Set up the drag overlay
+        const target = event.target as HTMLElement;
+        const rect = target.getBoundingClientRect();
         
-        // Get the original appointment element
-        const appointmentElement = document.querySelector(`[data-appointment-id="${appointment.id}"]`) as HTMLElement;
-        if (appointmentElement) {
-            // Get the appointment's dimensions and position
-            const rect = appointmentElement.getBoundingClientRect();
-            const calendarRect = calendarContainer.getBoundingClientRect();
+        originalTop = rect.top;
+        originalLeft = rect.left;
+        dayColumnWidth = rect.width;
+        
+        // Create the drag overlay
+        dragOverlay = document.createElement('div');
+        dragOverlay.className = 'drag-overlay';
+        dragOverlay.style.position = 'fixed';
+        dragOverlay.style.top = rect.top + 'px';
+        dragOverlay.style.left = rect.left + 'px';
+        dragOverlay.style.width = rect.width + 'px';
+        dragOverlay.style.height = rect.height + 'px';
+        dragOverlay.style.backgroundColor = 'rgba(66, 153, 225, 0.8)';
+        dragOverlay.style.borderRadius = '4px';
+        dragOverlay.style.zIndex = '1000';
+        dragOverlay.style.pointerEvents = 'none';
+        dragOverlay.style.transition = 'none';
+        dragOverlay.style.opacity = '0.7';
+        
+        // Add text to the overlay
+        const titleElement = document.createElement('div');
+        titleElement.textContent = appointment.client?.name || 'Appointment';
+        titleElement.style.padding = '4px';
+        titleElement.style.fontSize = '12px';
+        titleElement.style.fontWeight = 'bold';
+        titleElement.style.color = 'white';
+        titleElement.style.overflow = 'hidden';
+        titleElement.style.whiteSpace = 'nowrap';
+        titleElement.style.textOverflow = 'ellipsis';
+        
+        dragOverlay.appendChild(titleElement);
+        document.body.appendChild(dragOverlay);
+        
+        // Set up event handlers
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            if (!isDragging || !dragOverlay) return;
             
-            // Set the overlay appointment position and size
-            overlayAppointment.style.width = `${rect.width}px`;
-            overlayAppointment.style.height = `${rect.height}px`;
-            overlayAppointment.style.left = `${rect.left - calendarRect.left}px`;
-            overlayAppointment.style.top = `${rect.top - calendarRect.top}px`;
+            const dy = moveEvent.clientY - (event instanceof MouseEvent ? event.clientY : 0);
             
-            // Store the original top position for calculations
-            originalTop = rect.top - calendarRect.top;
+            // Update position
+            dragOverlay.style.top = (originalTop + dy) + 'px';
             
-            // Show the appointment title in the overlay
-            overlayAppointment.textContent = appointment.client?.name || 'Appointment';
-            
-            // Hide the original appointment during drag
-            appointmentElement.style.opacity = '0.4';
-            
-            // Show the drag overlay
-            dragOverlay.style.display = 'block';
-            
-            // Set the dragging state
-            isDragging = true;
-        }
+            // Prevent dragging outside of week view
+            if (weekView) {
+                const weekViewRect = weekView.getBoundingClientRect();
+                if (moveEvent.clientY < weekViewRect.top) {
+                    dragOverlay.style.top = weekViewRect.top + 'px';
+                } else if (moveEvent.clientY > weekViewRect.bottom) {
+                    dragOverlay.style.top = (weekViewRect.bottom - parseInt(dragOverlay.style.height)) + 'px';
+                }
+            }
+        };
+        
+        const handleMouseUp = () => {
+            handleDragEnd();
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+        
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
     }
-    
-    // Handle the appointment being dragged
-    function handleDragMove(event: MouseEvent | TouchEvent) {
-        if (!isDragging || !draggedAppointment || !overlayAppointment) return;
-        
-        event.preventDefault();
-        
-        // Get the current cursor position
-        let newY: number;
-        if (event instanceof MouseEvent) {
-            newY = event.clientY;
-        } else {
-            newY = event.touches[0].clientY;
-        }
-        
-        // Calculate how far we've moved
-        const deltaY = newY - currentY;
-        
-        // Update the overlay appointment position
-        if (overlayAppointment) {
-            const currentTop = parseInt(overlayAppointment.style.top || '0');
-            overlayAppointment.style.top = `${currentTop + deltaY}px`;
-        }
-        
-        // Update the current mouse position for the next move
-        currentY = newY;
-    }
-    
-    // Handle the end of a drag operation
+
     function handleDragEnd() {
         if (!isDragging || !draggedAppointment || !overlayAppointment) return;
-        
+
         if (!dragOverlay) {
             console.error('dragOverlay is null');
             return;
         }
-        
-        // Calculate the new position in minutes
-        const newTop = parseInt(overlayAppointment.style.top || '0');
-        const deltaY = newTop - originalTop;
-        const minutesMoved = Math.round(deltaY / heightPerMinute);
-        
-        // Round to the nearest 15-minute slot
-        const roundedMinutes = Math.round(minutesMoved / 15) * 15;
-        
-        // Calculate the updated times
-        const originalStart = new Date(draggedAppointment.start_time);
-        const originalEnd = new Date(draggedAppointment.end_time);
-        const durationMinutes = differenceInMinutes(originalEnd, originalStart);
-        
-        // Create new dates with the same day but moved time
-        const newStart = new Date(originalStart);
-        newStart.setMinutes(newStart.getMinutes() + roundedMinutes);
-        
-        const newEnd = new Date(newStart);
-        newEnd.setMinutes(newEnd.getMinutes() + durationMinutes);
-        
-        // Format for database
-        const formattedStartTime = format(newStart, "yyyy-MM-dd'T'HH:mm");
-        const formattedEndTime = format(newEnd, "yyyy-MM-dd'T'HH:mm");
-        
-        // Hide the overlay
-        dragOverlay.style.display = 'none';
-        
-        // Reset the original appointment opacity
-        const appointmentElement = document.querySelector(`[data-appointment-id="${draggedAppointment.id}"]`) as HTMLElement;
-        if (appointmentElement) {
-            appointmentElement.style.opacity = '1';
-        }
-        
-        // Reset dragging state
+
+        // Clean up
+        document.body.removeChild(dragOverlay);
+        dragOverlay = null;
         isDragging = false;
-        
-        // Update the local data immediately (optimistic update)
-        appointments = appointments.map(a => {
-            if (a.id === draggedAppointment?.id) {
-                return {
-                    ...a,
-                    start_time: formattedStartTime,
-                    end_time: formattedEndTime
-                };
-            }
-            return a;
-        });
-        
-        // Notify the parent component
-        dispatch('appointmentMoved', {
-            appointment: draggedAppointment,
-            newStartTime: formattedStartTime,
-            newEndTime: formattedEndTime
-        });
-        
-        // Reset the dragged appointment
         draggedAppointment = null;
+        overlayAppointment = null;
+    }
+
+    let dragStartY = 0;
+    let dragStartHour = 0;
+    let dragStartMinute = 0;
+    let dragStartDay: DateTime | null = null;
+
+    function handleAppointmentDragStart(event: CustomEvent<{appointment: Appointment, event: MouseEvent}>) {
+        const { appointment, event: mouseEvent } = event.detail;
+        
+        isDragging = true;
+        draggedAppointment = {...appointment};
+        dragStartY = mouseEvent.clientY;
+        
+        // Get the time values
+        const startDate = parseDateToLuxon(appointment.start_time);
+        dragStartHour = startDate.hour;
+        dragStartMinute = startDate.minute;
+        dragStartDay = startDate.startOf('day');
+        
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
     }
     
-    onMount(() => {
-        // Set the height per minute based on actual element sizes
-        const hourElement = document.querySelector('.time-slot');
-        if (hourElement) {
-            heightPerMinute = hourElement.clientHeight / 60; // 60 minutes per hour
+    // Handle mouse movement during drag
+    function handleMouseMove(event: MouseEvent) {
+        if (!isDragging || !draggedAppointment || !dragStartDay) return;
+        
+        const cellHeight = 60; // Height of each hour cell in pixels
+        const deltaY = event.clientY - dragStartY;
+        
+        // Calculate hour offset based on pixel movement (60px = 1 hour)
+        const hourOffset = Math.floor(deltaY / cellHeight);
+        
+        // Update preview
+        // Implementation would depend on your specific requirements
+        console.log(`Dragging appointment by ${hourOffset} hours`);
+    }
+    
+    // Handle mouse up to complete drag
+    function handleMouseUp(event: MouseEvent) {
+        if (isDragging && draggedAppointment) {
+            // Finalize the appointment move
+            // Implementation would depend on your specific requirements
+            console.log('Drag ended, appointment would be updated here');
         }
+        
+        // Reset drag state
+        isDragging = false;
+        draggedAppointment = null;
+        
+        // Remove event listeners
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+    }
+
+    onMount(() => {
+        updateVisibleDays();
     });
 </script>
 
-<div class="calendar" bind:this={calendarContainer}>
-    <div class="p-4 bg-white border-b flex justify-between">
-        <div class="flex items-center space-x-2">
-            <button 
-                class="p-2 rounded-md hover:bg-gray-100 text-gray-600"
-                on:click={() => view = 'day'}
-                class:bg-indigo-50={view === 'day'}
-                class:text-indigo-600={view === 'day'}
-                aria-label="Switch to day view"
-            >
+<div class="calendar-container">
+    <!-- Calendar header with navigation and view controls -->
+    <div class="calendar-header">
+        <!-- Left side with navigation -->
+        <div class="calendar-nav">
+            <button class="arrow-button" on:click={() => navigateDate('prev')} aria-label="Previous period">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+            </button>
+            
+            <button class="arrow-button" on:click={() => navigateDate('next')} aria-label="Next period">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+            </button>
+            
+            <button class="today-button" on:click={() => navigateDate('today')} aria-label="Go to today">
+                Today
+            </button>
+            
+            <div class="text-lg font-bold ml-3 text-gray-800" aria-live="polite">
+                {#if view === 'day'}
+                    <!-- Day view title -->
+                    {selectedDate.toFormat('EEEE, MMMM d, yyyy')}
+                {:else if view === 'week'}
+                    <!-- Week view title - Square style -->
+                    {visibleDays[0]?.toFormat('MMM d')} - {visibleDays[visibleDays.length - 1]?.toFormat('MMM d, yyyy')}
+                {:else}
+                    <!-- Month view title -->
+                    {selectedDate.toFormat('MMMM yyyy')}
+                {/if}
+            </div>
+        </div>
+        
+        <!-- Right side with view controls -->
+        <div class="view-toggle">
+            <button class={`view-button ${view === 'day' ? 'active' : ''}`} on:click={() => { view = 'day'; updateVisibleDays(); }} aria-pressed={view === 'day'} aria-label="Day view">
                 Day
             </button>
-            <button 
-                class="p-2 rounded-md hover:bg-gray-100 text-gray-600"
-                on:click={() => view = 'week'}
-                class:bg-indigo-50={view === 'week'}
-                class:text-indigo-600={view === 'week'}
-                aria-label="Switch to week view"
-            >
+            <button class={`view-button ${view === 'week' ? 'active' : ''}`} on:click={() => { view = 'week'; updateVisibleDays(); }} aria-pressed={view === 'week'} aria-label="Week view">
                 Week
             </button>
-            <button 
-                class="p-2 rounded-md hover:bg-gray-100 text-gray-600"
-                on:click={() => view = 'month'}
-                class:bg-indigo-50={view === 'month'}
-                class:text-indigo-600={view === 'month'}
-                aria-label="Switch to month view"
-            >
+            <button class={`view-button ${view === 'month' ? 'active' : ''}`} on:click={() => { view = 'month'; updateVisibleDays(); }} aria-pressed={view === 'month'} aria-label="Month view">
                 Month
-            </button>
-        </div>
-        <div class="flex items-center">
-            <button 
-                class="p-2 rounded-md hover:bg-gray-100 text-gray-600 flex items-center"
-                on:click={view === 'month' ? () => currentDate = addDays(currentDate, -7) : view === 'week' ? () => currentDate = addDays(currentDate, -7) : () => currentDate = addDays(currentDate, -1)}
-                aria-label="Previous {view}"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
-                </svg>
-            </button>
-            <span class="font-medium text-gray-900 mx-2">
-                {#if view === 'month'}
-                    {format(currentDate, 'MMMM yyyy')}
-                {:else if view === 'week'}
-                    {format(addDays(currentDate, -3), 'MMM d')} - {format(addDays(currentDate, 3), 'MMM d, yyyy')}
-                {:else}
-                    {format(currentDate, 'EEEE, MMMM d, yyyy')}
-                {/if}
-            </span>
-            <button 
-                class="p-2 rounded-md hover:bg-gray-100 text-gray-600 flex items-center"
-                on:click={view === 'month' ? () => currentDate = addDays(currentDate, 7) : view === 'week' ? () => currentDate = addDays(currentDate, 7) : () => currentDate = addDays(currentDate, 1)}
-                aria-label="Next {view}"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-                </svg>
             </button>
         </div>
     </div>
 
-    <div class="calendar-body p-4">
-        {#if view === 'month'}
-            <div class="grid grid-cols-7 gap-2">
-                <!-- Weekday headers -->
-                <div class="text-center font-medium text-gray-500 pb-2">Sun</div>
-                <div class="text-center font-medium text-gray-500 pb-2">Mon</div>
-                <div class="text-center font-medium text-gray-500 pb-2">Tue</div>
-                <div class="text-center font-medium text-gray-500 pb-2">Wed</div>
-                <div class="text-center font-medium text-gray-500 pb-2">Thu</div>
-                <div class="text-center font-medium text-gray-500 pb-2">Fri</div>
-                <div class="text-center font-medium text-gray-500 pb-2">Sat</div>
-
-                <!-- Day cells -->
-                {#each Array(daysToShow).fill(0).map((_, i) => addDays(dayStart, i)) as day}
-                    <div 
-                        class="calendar-day min-h-[100px] border rounded-md p-1 overflow-hidden
-                            {!isSameMonth(day, currentDate) ? 'bg-gray-50 text-gray-400' : ''} 
-                            {isToday(day) ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200'}"
-                        role="gridcell"
-                    >
-                        <div class="day-header flex justify-between items-center mb-1">
-                            <span class="text-sm font-medium {isToday(day) ? 'text-indigo-600' : 'text-gray-700'}">
-                                {format(day, 'd')}
-                            </span>
-                            {#if isSameMonth(day, currentDate)}
-                                <button 
-                                    class="text-gray-400 hover:text-indigo-600 text-xs" 
-                                    aria-label="Add appointment on {format(day, 'MMMM d')}"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 01-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
-                                    </svg>
-                                </button>
-                            {/if}
+    <!-- Calendar body -->
+    <div class="calendar-body overflow-auto flex-grow relative">
+        {#if view === 'week'}
+            <!-- Square-style week view -->
+            <div class="grid grid-cols-8 w-full h-full relative week-view" bind:this={weekView}>
+                <!-- Time column -->
+                <div class="border-r border-b">
+                    <div class="sticky top-0 z-10 bg-white border-b time-header-cell"></div>
+                    
+                    {#each Array(businessHours.end - businessHours.start + 1) as _, i}
+                        <div class="time-label border-b">
+                            <span>{formatHour(businessHours.start + i)}</span>
                         </div>
-                        <div class="appointments text-xs space-y-1 overflow-y-auto max-h-[80px]">
-                            {#each visibleAppointments.filter(appointment => isSameDay(parseISO(appointment.start_time), day)) as appointment}
-                                <div 
-                                    class="appointment bg-indigo-100 text-indigo-800 p-1 rounded overflow-hidden flex flex-col cursor-pointer hover:bg-indigo-200 transition-colors"
-                                    on:click={() => dispatch('appointmentClick', { id: appointment.id })}
-                                    on:keydown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                            dispatch('appointmentClick', { id: appointment.id });
-                                        }
-                                    }}
-                                    role="button"
-                                    tabindex="0"
-                                    data-appointment-id={appointment.id}
-                                >
-                                    <span class="time font-medium">{format(new Date(appointment.start_time), 'h:mm a')}</span>
-                                    <span class="client truncate">{appointment.client?.name}</span>
-                                </div>
-                            {/each}
-                        </div>
-                    </div>
-                {/each}
-            </div>
-
-        {:else if view === 'week'}
-            <div class="week-view grid" style="grid-template-columns: 50px repeat({daysToShow}, 1fr);" role="grid">
-                <!-- Time labels column -->
-                <div class="time-labels" role="row">
-                    <div class="h-12"></div> <!-- Empty cell for the header row -->
-                    {#each timeSlots as time}
-                        <div class="time-label h-16 text-xs text-gray-500 text-right pr-2" role="gridcell">
-                            {time}
-                        </div>
+                        <!-- Add half-hour marker -->
+                        {#if i < businessHours.end - businessHours.start}
+                            <div class="time-label border-b relative" style="height: 0;">
+                                <div class="half-hour-marker"></div>
+                            </div>
+                        {/if}
                     {/each}
                 </div>
                 
                 <!-- Day columns -->
-                {#each Array(daysToShow).fill(0).map((_, i) => addDays(dayStart, i)) as day, dayIndex}
-                    <div class="day-column" role="row">
-                        <!-- Day header -->
-                        <div class="day-header p-2 text-center border-b border-gray-200 h-12 flex flex-col justify-center {isToday(day) ? 'bg-indigo-50' : ''}" role="rowheader">
-                            <div class="text-sm font-medium {isToday(day) ? 'text-indigo-600' : 'text-gray-700'}">{format(day, 'EEE')}</div>
-                            <div class="text-xs text-gray-500">{format(day, 'MMM d')}</div>
+                {#each visibleDays as day, dayIndex}
+                    <div class="relative h-full" style="min-width: 0;">
+                        <div class={`day-header border-r border-b p-2 text-center bg-white sticky top-0 z-10 ${day.hasSame(DateTime.now(), 'day') ? 'today-cell' : ''}`}>
+                            <div class="date-day">{day.toFormat('EEE')}</div>
+                            <div class={`date-number ${day.hasSame(DateTime.now(), 'day') ? 'today-date' : ''}`}>{day.toFormat('d')}</div>
                         </div>
                         
-                        <!-- Time grid for this day -->
-                        <div class="time-grid relative" role="grid">
-                            {#each timeSlots as time}
-                                <div class="hour-slot h-16 border-b border-gray-100 relative time-slot" role="row">
-                                    <!-- Quarter-hour grid lines -->
-                                    <div class="quarter-hour absolute w-full h-px bg-gray-100" style="top: 25%;"></div>
-                                    <div class="quarter-hour absolute w-full h-px bg-gray-100" style="top: 50%;"></div>
-                                    <div class="quarter-hour absolute w-full h-px bg-gray-100" style="top: 75%;"></div>
-                                </div>
-                            {/each}
-                            
-                            <!-- Appointments for this day -->
-                            {#each visibleAppointments.filter(appointment => isSameDay(parseISO(appointment.start_time), day)) as appointment}
-                                <div 
-                                    class="appointment absolute w-full bg-indigo-100 text-indigo-800 rounded-md p-2 overflow-hidden cursor-grab border border-indigo-200 transition-shadow hover:shadow-md"
-                                    style={getAppointmentStyle(appointment)}
-                                    data-appointment-id={appointment.id}
-                                    on:mousedown={(e) => handleDragStart(appointment, e)}
-                                    on:touchstart={(e) => handleDragStart(appointment, e)}
-                                    on:click={(e) => {
-                                        if (!isDragging) dispatch('appointmentClick', { id: appointment.id });
-                                        e.stopPropagation();
-                                    }}
-                                    on:keydown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                            dispatch('appointmentClick', { id: appointment.id });
-                                        }
-                                    }}
-                                    role="button"
-                                    tabindex="0"
-                                >
-                                    <div class="text-xs text-indigo-900">{format(new Date(appointment.start_time), 'h:mm a')}</div>
-                                    <div class="text-sm font-semibold truncate">{appointment.client?.name}</div>
-                                </div>
-                            {/each}
-                        </div>
+                        <!-- Hour cells for this day -->
+                        {#each Array(businessHours.end - businessHours.start + 1) as _, hourIndex}
+                            <button 
+                                class={`time-cell border-r border-b relative ${day.hasSame(DateTime.now(), 'day') ? 'bg-blue-50/30' : ''}`}
+                                style="height: 60px; text-align: left; width: 100%;"
+                                data-hour={businessHours.start + hourIndex}
+                                data-day={day.toFormat('yyyy-MM-dd')}
+                                on:click={(e) => handleTimeClick(e, day, businessHours.start + hourIndex)}
+                                on:keydown={(e) => e.key === 'Enter' && handleTimeClick(e, day, businessHours.start + hourIndex)}
+                                aria-label="Create appointment on {day.toFormat('EEEE, MMMM d')} at {formatHour(businessHours.start + hourIndex)}"
+                            >
+                                <!-- Show current time indicator if this cell contains the current time -->
+                                {#if day.hasSame(DateTime.now(), 'day') && DateTime.now().hour === (businessHours.start + hourIndex)}
+                                    <div 
+                                        class="current-time-indicator" 
+                                        style="top: {Math.floor(DateTime.now().minute / 60 * 100)}%;"
+                                    ></div>
+                                {/if}
+                                
+                                <!-- Add half-hour marker -->
+                                <div class="half-hour-marker"></div>
+                            </button>
+                        {/each}
+                        
+                        <!-- Appointment cards for this day column -->
+                        {#each appointments.filter(a => {
+                            const startDate = parseDateToLuxon(a.start_time);
+                            return startDate.hasSame(day, 'day');
+                        }) as appointment}
+                            <svelte:component 
+                                this={AppointmentCard} 
+                                {appointment} 
+                                view="week" 
+                                style={getAppointmentStyle(appointment, dayIndex)}
+                                isDragging={isDragging && draggedAppointment?.id === appointment.id}
+                                on:click={(e) => handleAppointmentClick(appointment, e.detail.event)}
+                                on:dragStart
+                            />
+                        {/each}
                     </div>
                 {/each}
             </div>
-        {:else}
+        {:else if view === 'day'}
             <!-- Day view -->
-            <div class="day-view grid" style="grid-template-columns: 50px 1fr;" role="grid">
+            <div class="day-view grid border-t border-l" style="grid-template-columns: 60px 1fr;">
                 <!-- Time labels column -->
-                <div class="time-labels" role="row">
-                    {#each timeSlots as time}
-                        <div class="time-label h-16 text-xs text-gray-500 text-right pr-2" role="gridcell">
-                            {time}
+                <div>
+                    <div class="time-header-cell sticky top-0 z-10 bg-white border-b border-r h-16"></div>
+                    
+                    {#each Array(businessHours.end - businessHours.start + 1) as _, i}
+                        <div class="time-label border-r border-b bg-gray-50">
+                            {(businessHours.start + i) % 12 || 12} {(businessHours.start + i) >= 12 ? 'PM' : 'AM'}
                         </div>
                     {/each}
                 </div>
                 
                 <!-- Day column -->
-                <div class="day-column">
+                <div>
                     <!-- Day header -->
-                    <div class="day-header p-2 text-center border-b border-gray-200 bg-indigo-50">
-                        <div class="text-indigo-600 font-medium">{format(currentDate, 'EEEE')}</div>
+                    <div class={`day-header border-r border-b p-2 text-center sticky top-0 z-10 bg-white ${visibleDays[0]?.hasSame(DateTime.now(), 'day') ? 'today-cell' : ''}`}>
+                        <div class="date-day">{visibleDays[0]?.toFormat('EEE')}</div>
+                        <div class={`date-number ${visibleDays[0]?.hasSame(DateTime.now(), 'day') ? 'today-date' : ''}`}>{visibleDays[0]?.toFormat('d')}</div>
+                        <div class="text-sm">{visibleDays[0]?.toFormat('MMMM yyyy')}</div>
                     </div>
                     
-                    {#each timeSlots as time}
-                        <div class="hour-slot h-16 border-b border-gray-100 relative" role="row">
-                            <!-- Quarter-hour grid lines -->
-                            <div class="quarter-hour absolute w-full h-px bg-gray-100" style="top: 25%;"></div>
-                            <div class="quarter-hour absolute w-full h-px bg-gray-100" style="top: 50%;"></div>
-                            <div class="quarter-hour absolute w-full h-px bg-gray-100" style="top: 75%;"></div>
-                        </div>
+                    <!-- Hour cells -->
+                    {#each Array(businessHours.end - businessHours.start + 1) as _, i}
+                        <button 
+                            class={`time-cell border-r border-b relative ${visibleDays[0]?.hasSame(DateTime.now(), 'day') ? 'bg-blue-50/30' : ''}`}
+                            style="height: 60px; text-align: left; width: 100%;"
+                            data-hour={businessHours.start + i}
+                            data-day={visibleDays[0]?.toFormat('yyyy-MM-dd')}
+                            on:click={(e) => handleTimeClick(e, visibleDays[0], businessHours.start + i)}
+                            on:keydown={(e) => e.key === 'Enter' && handleTimeClick(e, visibleDays[0], businessHours.start + i)}
+                            aria-label="Create appointment at {visibleDays[0]?.toFormat('EEEE, MMMM d')} at {(businessHours.start + i) % 12 || 12} {(businessHours.start + i) >= 12 ? 'PM' : 'AM'}"
+                        >
+                            <!-- Half-hour marker -->
+                            <div class="half-hour-marker"></div>
+                            
+                            <!-- Current time indicator (only show for today) -->
+                            {#if visibleDays[0]?.hasSame(DateTime.now(), 'day') && DateTime.now().hour === (businessHours.start + i)}
+                                <div class="current-time-indicator" style="top: {getMinutePercentage(DateTime.now().minute)}%;"></div>
+                            {/if}
+                        </button>
                     {/each}
                     
-                    <!-- Appointments for this day -->
-                    {#each visibleAppointments as appointment}
-                        <div 
-                            class="appointment absolute w-full bg-indigo-100 text-indigo-800 rounded-md p-2 overflow-hidden cursor-grab border border-indigo-200 transition-shadow hover:shadow-md"
-                            style={getAppointmentStyle(appointment)}
-                            data-appointment-id={appointment.id}
-                            on:mousedown={(e) => handleDragStart(appointment, e)}
-                            on:touchstart={(e) => handleDragStart(appointment, e)}
-                            on:click={(e) => {
-                                if (!isDragging) dispatch('appointmentClick', { id: appointment.id });
-                                e.stopPropagation();
-                            }}
-                            on:keydown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    dispatch('appointmentClick', { id: appointment.id });
-                                }
-                            }}
-                            role="button"
-                            tabindex="0"
-                        >
-                            <div class="text-xs text-indigo-900">{format(new Date(appointment.start_time), 'h:mm a')}</div>
-                            <div class="text-sm font-semibold truncate">{appointment.client?.name}</div>
+                    <!-- Render appointments for this day -->
+                    {#each appointments.filter(apt => isVisibleInDayView(apt)) as appointment}
+                        <svelte:component 
+                            this={AppointmentCard} 
+                            {appointment} 
+                            view="day" 
+                            style={getAppointmentStyle(appointment)} 
+                            isDragging={isDragging && draggedAppointment?.id === appointment.id}
+                            on:click={(e) => handleAppointmentClick(appointment, e.detail.event)}
+                            on:dragStart
+                        />
+                    {/each}
+                </div>
+            </div>
+        {:else}
+            <!-- Month view - Square-style -->
+            <div class="month-view">
+                <div class="grid grid-cols-7 text-center">
+                    <div class="py-2 font-medium text-gray-500">Sun</div>
+                    <div class="py-2 font-medium text-gray-500">Mon</div>
+                    <div class="py-2 font-medium text-gray-500">Tue</div>
+                    <div class="py-2 font-medium text-gray-500">Wed</div>
+                    <div class="py-2 font-medium text-gray-500">Thu</div>
+                    <div class="py-2 font-medium text-gray-500">Fri</div>
+                    <div class="py-2 font-medium text-gray-500">Sat</div>
+                </div>
+                
+                <div class="grid grid-cols-7 border-t border-l">
+                    {#each dayColumns as day}
+                        <div class={`day-cell ${day.date.hasSame(DateTime.now(), 'day') ? 'today-cell' : ''} ${day.date.month !== selectedDate.month ? 'bg-gray-50 text-gray-400' : ''}`}>
+                            <div class="text-right p-1">
+                                <span class="inline-block w-6 h-6 rounded-full text-center ${day.date.hasSame(DateTime.now(), 'day') ? 'bg-blue-600 text-white' : ''} ">
+                                    {day.date.day}
+                                </span>
+                            </div>
+                            
+                            <!-- Day's appointments -->
+                            <div class="appointments-container flex flex-col gap-1 mt-1">
+                                {#each day.appointments.slice(0, 3) as appointment}
+                                    <svelte:component this={AppointmentCard} {appointment} view="month" />
+                                {/each}
+                                
+                                {#if day.appointments.length > 3}
+                                    <div class="text-xs text-gray-600 font-medium px-1">+{day.appointments.length - 3} more</div>
+                                {/if}
+                            </div>
                         </div>
                     {/each}
                 </div>
@@ -525,35 +632,243 @@
     </div>
 </div>
 
+<!-- Appointment Details Dialog -->
+{#if expandedAppointment}
+<dialog 
+  class="appointment-details-modal p-0 rounded-lg shadow-xl w-[350px] bg-white overflow-hidden"
+  open
+  aria-labelledby="appointment-title"
+>
+  <div class="modal-header bg-blue-600 text-white p-4">
+    <h3 id="appointment-title" class="text-lg font-bold">{expandedAppointment.client?.name || 'Unknown'}</h3>
+    <div class="text-sm">{formatSalonTime(parseDateToLuxon(expandedAppointment.start_time).toJSDate(), 'EEEE, MMMM d')}</div>
+  </div>
+  
+  <div class="modal-body p-4">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="text-gray-600 text-sm">Time</div>
+        <div class="font-medium">
+          {formatSalonTime(parseDateToLuxon(expandedAppointment.start_time).toJSDate(), 'h:mm a')} - 
+          {formatSalonTime(parseDateToLuxon(expandedAppointment.end_time).toJSDate(), 'h:mm a')}
+        </div>
+      </div>
+      
+      <div>
+        <div class="text-gray-600 text-sm">Duration</div>
+        <div class="font-medium">
+          {Math.round(parseDateToLuxon(expandedAppointment.end_time).diff(parseDateToLuxon(expandedAppointment.start_time), 'minutes').minutes)} min
+        </div>
+      </div>
+    </div>
+    
+    <div class="mb-4">
+      <div class="text-gray-600 text-sm">Services</div>
+      <div class="font-medium">{expandedAppointment.service_type || 'No services specified'}</div>
+    </div>
+    
+    {#if expandedAppointment.notes}
+      <div class="mb-4">
+        <div class="text-gray-600 text-sm">Notes</div>
+        <div class="font-medium">{expandedAppointment.notes}</div>
+      </div>
+    {/if}
+  </div>
+  
+  <div class="modal-footer border-t p-3 flex justify-end space-x-2">
+    <button 
+      class="px-3 py-1.5 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
+      on:click={() => expandedAppointment = null}
+    >
+      Close
+    </button>
+    <button 
+      class="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
+      on:click={() => {
+        if (expandedAppointment && expandedAppointmentId) {
+          dispatch('editAppointment', { id: expandedAppointmentId });
+        }
+        expandedAppointment = null;
+      }}
+    >
+      Edit
+    </button>
+  </div>
+</dialog>
+{/if}
+
 <style>
-    .calendar {
-        width: 100%;
-        height: auto;
-        min-height: 600px;
+    /* Calendar container */
+    .calendar-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background-color: white;
+        border-radius: 0.5rem;
         overflow: hidden;
+    }
+
+    /* Calendar header */
+    .calendar-header {
+        padding: 0.75rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    /* Calendar navigation */
+    .calendar-nav {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .today-button {
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.375rem;
+        background-color: #ebf5ff;
+        color: #2563eb;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .arrow-button {
+        padding: 0.375rem;
+        border-radius: 9999px;
+        color: #374151;
+    }
+    
+    .arrow-button:hover {
+        background-color: #f3f4f6;
+    }
+
+    /* View toggle buttons */
+    .view-toggle {
+        display: flex;
+        gap: 0.25rem;
+        background-color: #f3f4f6;
+        padding: 0.25rem;
+        border-radius: 0.375rem;
+    }
+
+    .view-button {
+        padding: 0.375rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        border-radius: 0.375rem;
+    }
+
+    .view-button.active {
+        background-color: white;
+        color: #2563eb;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+
+    .view-button:not(.active) {
+        color: #374151;
+    }
+    
+    .view-button:not(.active):hover {
+        background-color: #e5e7eb;
+    }
+
+    /* Week view */
+    .week-view {
+        grid-template-rows: auto repeat(var(--business-hours, 14), 60px);
+    }
+
+    /* Day headers */
+    .day-header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 4rem;
+    }
+
+    /* Time cells */
+    .time-cell {
+        position: relative;
+        transition: background-color 0.2s;
+        height: 60px;
+    }
+
+    .time-cell:hover {
+        background-color: rgba(219, 234, 254, 0.4);
+    }
+
+    /* Time labels */
+    .time-label {
+        position: sticky;
+        left: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 0.5rem;
+        font-size: 0.75rem;
+        color: #4b5563;
+        font-weight: 500;
+        height: 60px;
+        width: 60px;
+    }
+
+    /* Half-hour marker */
+    .half-hour-marker {
+        position: absolute;
+        width: 100%;
+        height: 1px;
+        background-color: #e5e7eb;
+        top: 50%;
+    }
+
+    /* Current time indicator */
+    .current-time-indicator {
+        position: absolute;
+        width: 100%;
+        height: 2px;
+        background-color: #ef4444;
+        z-index: 10;
+    }
+
+    /* Day cells for month view */
+    .day-cell {
+        min-height: 100px;
+        padding: 0.25rem;
+        position: relative;
+        border: 1px solid #e5e7eb;
+    }
+
+    /* Making dates look more like Square */
+    .date-number {
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+
+    .date-day {
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    /* Current date highlight */
+    .today-cell {
+        background-color: #ebf5ff;
+    }
+    
+    .today-date {
+        color: #2563eb;
+    }
+
+    /* Calendar body */
+    .calendar-body {
+        overflow: auto;
+        flex-grow: 1;
         position: relative;
     }
-    
-    .time-grid {
-        min-height: calc((var(--business-hours) * 4rem));
-        height: 100%;
-    }
-    
-    .appointment {
-        left: 0.5rem;
-        right: 0.5rem;
-        width: auto;
-    }
-    
-    /* This class is applied dynamically during drag operations */
-    :global(.appointment.dragging) {
-        opacity: 0.7;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        z-index: 50;
-    }
-    
-    .day-column {
-        border-right: 1px solid #f3f4f6;
-        border-left: 1px solid #f3f4f6;
+
+    /* Month view */
+    .month-view {
+        width: 100%;
     }
 </style>

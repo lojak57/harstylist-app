@@ -4,6 +4,13 @@
     import { goto } from '$app/navigation';
     import { fade } from 'svelte/transition';
     import { formatDate, formatTime } from '$lib/utils';
+    import { createLocalDate, localToStorageFormat, debugDate } from '$lib/utils/timeUtils';
+
+    // Redirect to the consolidated appointments page
+    onMount(() => {
+        console.log('Redirecting from the deprecated appointments/new page');
+        goto('/appointments');
+    });
 
     type Client = {
         id: string;
@@ -31,6 +38,10 @@
     let filteredClients: Client[] = [];
     let searchQuery = '';
     
+    // Add end time tracking
+    let calculatedEndTime = '';
+    let calculatedDurationMinutes = 0;
+    
     // Form state
     let loading = false;
     let error: string | null = null;
@@ -41,6 +52,35 @@
     const totalSteps = 3;
     
     let formattedDateTime = 'Not selected';
+
+    // Time slots for appointment selection with formatted labels
+    const timeOptions = [
+        { value: '08:00', label: '8:00 AM' },
+        { value: '08:30', label: '8:30 AM' },
+        { value: '09:00', label: '9:00 AM' },
+        { value: '09:30', label: '9:30 AM' },
+        { value: '10:00', label: '10:00 AM' },
+        { value: '10:30', label: '10:30 AM' },
+        { value: '11:00', label: '11:00 AM' },
+        { value: '11:30', label: '11:30 AM' },
+        { value: '12:00', label: '12:00 PM' },
+        { value: '12:30', label: '12:30 PM' },
+        { value: '13:00', label: '1:00 PM' },
+        { value: '13:30', label: '1:30 PM' },
+        { value: '14:00', label: '2:00 PM' },
+        { value: '14:30', label: '2:30 PM' },
+        { value: '15:00', label: '3:00 PM' },
+        { value: '15:30', label: '3:30 PM' },
+        { value: '16:00', label: '4:00 PM' },
+        { value: '16:30', label: '4:30 PM' },
+        { value: '17:00', label: '5:00 PM' },
+        { value: '17:30', label: '5:30 PM' },
+        { value: '18:00', label: '6:00 PM' },
+        { value: '18:30', label: '6:30 PM' },
+        { value: '19:00', label: '7:00 PM' },
+        { value: '19:30', label: '7:30 PM' },
+        { value: '20:00', label: '8:00 PM' },
+    ];
 
     onMount(async () => {
         await Promise.all([
@@ -137,26 +177,63 @@
             .reduce((sum, service) => sum + service.price, 0);
     }
 
+    // Improved service duration parser that handles both time formats (HH:MM:SS) and text formats
+    function parseDuration(durationStr: string) {
+        if (!durationStr) return 30;
+        
+        // Strip any parentheses or extra whitespace
+        const cleanDuration = durationStr.replace(/[\s()]/g, '');
+        
+        // Check if it's in the format HH:MM:SS or similar time format
+        const timeFormatMatch = cleanDuration.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+        if (timeFormatMatch) {
+            const hours = parseInt(timeFormatMatch[1] || '0');
+            const minutes = parseInt(timeFormatMatch[2] || '0');
+            // Convert to total minutes
+            return (hours * 60) + minutes;
+        }
+        
+        // If not in time format, try text format
+        const lowerDuration = durationStr.toLowerCase();
+        let totalMinutes = 0;
+        
+        // Extract hours
+        const hourMatch = lowerDuration.match(/(\d+)\s*hours?/i);
+        if (hourMatch && hourMatch[1]) {
+            totalMinutes += parseInt(hourMatch[1]) * 60;
+        }
+        
+        // Extract minutes
+        const minuteMatch = lowerDuration.match(/(\d+)\s*minutes?/i);
+        if (minuteMatch && minuteMatch[1]) {
+            totalMinutes += parseInt(minuteMatch[1]);
+        }
+        
+        // If no valid duration found, default to 30 minutes
+        return totalMinutes || 30;
+    }
+
+    function getSelectedServicesDurationMinutes(): number {
+        const selectedServicesList = services.filter(service => selectedServices.includes(service.id));
+        if (selectedServicesList.length === 0) return 0;
+        
+        // Calculate total duration using our improved parser
+        let totalMinutes = 0;
+        for (const service of selectedServicesList) {
+            const minutes = parseDuration(service.duration);
+            totalMinutes += minutes;
+        }
+        
+        return totalMinutes;
+    }
+
     function getSelectedServicesDuration(): string {
         const selectedServicesList = services.filter(service => selectedServices.includes(service.id));
         if (selectedServicesList.length === 0) return '';
         
         // For simplicity, we'll just display the total time as a sum
         // A more advanced implementation could calculate actual time slots
-        let totalMinutes = 0;
-        for (const service of selectedServicesList) {
-            const durationParts = service.duration.match(/(\d+)\s*hours?|\s*(\d+)\s*minutes?/gi) || [];
-            
-            for (const part of durationParts) {
-                if (part.includes('hour')) {
-                    const match = part.match(/(\d+)/);
-                    totalMinutes += parseInt(match ? match[0] : '0') * 60;
-                } else if (part.includes('minute')) {
-                    const match = part.match(/(\d+)/);
-                    totalMinutes += parseInt(match ? match[0] : '0');
-                }
-            }
-        }
+        let totalMinutes = getSelectedServicesDurationMinutes();
         
         const hours = Math.floor(totalMinutes / 60);
         const minutes = totalMinutes % 60;
@@ -213,6 +290,19 @@
         }
     }
 
+    function calculateEndTimeString(date: string, time: string, durationMinutes: number): string {
+        const startTime = new Date(`${date}T${time}`);
+        const endTime = new Date(startTime.getTime() + (durationMinutes * 60 * 1000));
+        
+        const hours = endTime.getHours();
+        const minutes = endTime.getMinutes();
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const displayHours = hours % 12 || 12;
+        const displayMinutes = minutes < 10 ? `0${minutes}` : minutes;
+        
+        return `${displayHours}:${displayMinutes} ${ampm}`;
+    }
+
     async function handleSubmit() {
         // Validate all steps before submission
         formErrors = {};
@@ -229,7 +319,7 @@
         }
         
         if (Object.keys(formErrors).length > 0) {
-            // Go to the first step with errors
+            // Set currentStep to the step with errors
             if (formErrors.client) {
                 currentStep = 1;
             } else if (formErrors.services) {
@@ -240,67 +330,77 @@
             return;
         }
         
-        loading = true;
-        error = null;
-
         try {
+            loading = true;
+            error = null;
+            
             // Get the current user to verify we're authenticated
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Not authenticated');
-
-            // Ensure we're working with the correct UTC dates
-            let startTimeObj = new Date(`${date}T${time}`);
             
-            // Verify we have a valid date
-            if (isNaN(startTimeObj.getTime())) {
-                throw new Error('Invalid date or time format');
+            // Ensure we have the end time from our calculation
+            if (!calculatedEndTime && selectedServices.length > 0) {
+                updateEndTime();
             }
             
-            // Guarantee a minimum appointment duration of 30 minutes
-            let durationMinutes = Math.max(30, 0); // Start with 30 min minimum
+            console.log('📆 APPOINTMENT CREATION - NEW PAGE 📆');
+            console.log('date:', date);
+            console.log('time:', time);
+            console.log('calculatedDurationMinutes:', calculatedDurationMinutes);
             
-            // Add duration from selected services if available
-            if (selectedServices.length > 0) {
-                for (const serviceId of selectedServices) {
-                    const service = services.find(s => s.id === serviceId);
-                    if (service?.duration) {
-                        const hourMatch = service.duration.match(/(\d+)\s*hour/i);
-                        const minuteMatch = service.duration.match(/(\d+)\s*minute/i);
-                        
-                        if (hourMatch) durationMinutes += parseInt(hourMatch[1]) * 60;
-                        if (minuteMatch) durationMinutes += parseInt(minuteMatch[1]);
-                    }
-                }
+            // Create date objects using our consistent utility functions
+            const startDateTime = createLocalDate(date, time);
+            
+            // Debug the created date objects
+            debugDate(startDateTime, 'Start DateTime');
+            
+            // Calculate end time
+            let endDateTime;
+            if (calculatedDurationMinutes > 0) {
+                // Use our calculated duration
+                endDateTime = new Date(startDateTime.getTime() + (calculatedDurationMinutes * 60 * 1000));
+            } else {
+                // Default to 30 minutes if no duration calculated
+                endDateTime = new Date(startDateTime.getTime() + (30 * 60 * 1000));
             }
             
-            // Create end time by adding duration
-            let endTimeObj = new Date(startTimeObj.getTime() + (durationMinutes * 60 * 1000));
+            debugDate(endDateTime, 'End DateTime');
             
-            console.log('Start time (local):', startTimeObj.toString());
-            console.log('End time (local):', endTimeObj.toString());
-            console.log('Duration minutes:', durationMinutes);
+            // Convert to storage format (ISO strings)
+            const formattedStartTime = localToStorageFormat(startDateTime);
+            const formattedEndTime = localToStorageFormat(endDateTime);
             
-            // Create the appointment record
+            console.log('📆 DATABASE STORAGE VALUES 📆');
+            console.log('formattedStartTime:', formattedStartTime);
+            console.log('formattedEndTime:', formattedEndTime);
+            
+            // Get the service names for display
+            const serviceNames = selectedServices.map(id => {
+                const service = services.find(s => s.id === id);
+                return service?.name || '';
+            }).filter(name => name).join(', ');
+            
             const appointment = {
                 stylist_id: user.id,
                 client_id: selectedClient,
-                start_time: startTimeObj.toISOString(),
-                end_time: endTimeObj.toISOString(),
+                start_time: formattedStartTime,
+                end_time: formattedEndTime,
+                service_type: serviceNames,
                 notes: notes || null,
-                service_type: services.filter(s => selectedServices.includes(s.id)).map(s => s.name).join(', ')
+                status: 'scheduled'
             };
             
-            console.log('Submitting appointment:', appointment);
-
+            console.log('Creating appointment:', appointment);
+            
             const { error: insertError } = await supabase
                 .from('appointments')
                 .insert([appointment]);
-
+            
             if (insertError) {
                 console.error('Insert error:', insertError);
                 throw insertError;
             }
-
+            
             // Redirect to the appointments list
             goto('/appointments');
         } catch (e: any) {
@@ -308,6 +408,56 @@
             error = e.message || 'An error occurred';
             loading = false;
         }
+    }
+
+    // Update functions to track and display end times
+    function updateEndTime() {
+        if (!date || !time) return;
+        
+        try {
+            console.log('Calculating end time with services:', selectedServices);
+            const startDateTime = new Date(`${date}T${time}`);
+            if (isNaN(startDateTime.getTime())) return;
+            
+            // Calculate duration based on selected services
+            calculatedDurationMinutes = 0;
+            const selectedServicesList = services.filter(service => selectedServices.includes(service.id));
+            
+            selectedServicesList.forEach(service => {
+                console.log('Service found:', service);
+                console.log('Service duration raw:', service.duration);
+                const minutes = parseDuration(service.duration);
+                calculatedDurationMinutes += minutes;
+                console.log(`Added ${minutes} minutes for service: ${service.name}, total now: ${calculatedDurationMinutes}`);
+            });
+            
+            // Ensure minimum duration of 30 minutes if no valid duration found
+            if (calculatedDurationMinutes === 0) calculatedDurationMinutes = 30;
+            
+            console.log('Final appointment duration:', calculatedDurationMinutes, 'minutes');
+            
+            // Add duration to start time to get end time
+            const endDateTime = new Date(startDateTime.getTime() + (calculatedDurationMinutes * 60 * 1000));
+            console.log('Start date/time:', startDateTime.toLocaleString());
+            console.log('End date/time:', endDateTime.toLocaleString());
+            
+            // Format end time for display (e.g., "11:30 AM")
+            const hours = endDateTime.getHours();
+            const minutes = endDateTime.getMinutes();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            const displayMinutes = minutes < 10 ? `0${minutes}` : minutes;
+            
+            calculatedEndTime = `${displayHours}:${displayMinutes} ${ampm}`;
+            console.log(`Appointment will end at: ${calculatedEndTime} (duration: ${calculatedDurationMinutes} minutes)`);
+        } catch (e) {
+            console.error('Error calculating end time:', e);
+        }
+    }
+
+    // Watch for changes in services or time to update end time
+    $: if (selectedServices.length > 0 || (date && time)) {
+        updateEndTime();
     }
 
     $: {
@@ -569,7 +719,7 @@
                         <div class="space-y-6" transition:fade={{ duration: 200 }}>
                             <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
                                 <div>
-                                    <label for="date" class="block text-sm font-medium leading-6 text-gray-900">Date</label>
+                                    <label for="date" class="block text-sm font-medium leading-6 text-gray-900">Start Date</label>
                                     <div class="mt-2">
                                         <input 
                                             type="date" 
@@ -578,6 +728,7 @@
                                             min={new Date().toISOString().split('T')[0]}
                                             bind:value={date}
                                             class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            on:change={updateEndTime}
                                         />
                                     </div>
                                     {#if formErrors.date}
@@ -585,66 +736,19 @@
                                     {/if}
                                 </div>
                                 <div>
-                                    <label for="time" class="block text-sm font-medium leading-6 text-gray-900">Time</label>
+                                    <label for="time" class="block text-sm font-medium leading-6 text-gray-900">Start Time</label>
                                     <div class="mt-2">
                                         <select
                                             name="time"
                                             id="time"
                                             bind:value={time}
                                             class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            on:change={updateEndTime}
                                         >
                                             <option value="">Select a time</option>
-                                            <!-- Morning slots -->
-                                            <option value="08:00">8:00 AM</option>
-                                            <option value="08:15">8:15 AM</option>
-                                            <option value="08:30">8:30 AM</option>
-                                            <option value="08:45">8:45 AM</option>
-                                            <option value="09:00">9:00 AM</option>
-                                            <option value="09:15">9:15 AM</option>
-                                            <option value="09:30">9:30 AM</option>
-                                            <option value="09:45">9:45 AM</option>
-                                            <option value="10:00">10:00 AM</option>
-                                            <option value="10:15">10:15 AM</option>
-                                            <option value="10:30">10:30 AM</option>
-                                            <option value="10:45">10:45 AM</option>
-                                            <option value="11:00">11:00 AM</option>
-                                            <option value="11:15">11:15 AM</option>
-                                            <option value="11:30">11:30 AM</option>
-                                            <option value="11:45">11:45 AM</option>
-                                            <!-- Afternoon slots -->
-                                            <option value="12:00">12:00 PM</option>
-                                            <option value="12:15">12:15 PM</option>
-                                            <option value="12:30">12:30 PM</option>
-                                            <option value="12:45">12:45 PM</option>
-                                            <option value="13:00">1:00 PM</option>
-                                            <option value="13:15">1:15 PM</option>
-                                            <option value="13:30">1:30 PM</option>
-                                            <option value="13:45">1:45 PM</option>
-                                            <option value="14:00">2:00 PM</option>
-                                            <option value="14:15">2:15 PM</option>
-                                            <option value="14:30">2:30 PM</option>
-                                            <option value="14:45">2:45 PM</option>
-                                            <option value="15:00">3:00 PM</option>
-                                            <option value="15:15">3:15 PM</option>
-                                            <option value="15:30">3:30 PM</option>
-                                            <option value="15:45">3:45 PM</option>
-                                            <!-- Evening slots -->
-                                            <option value="16:00">4:00 PM</option>
-                                            <option value="16:15">4:15 PM</option>
-                                            <option value="16:30">4:30 PM</option>
-                                            <option value="16:45">4:45 PM</option>
-                                            <option value="17:00">5:00 PM</option>
-                                            <option value="17:15">5:15 PM</option>
-                                            <option value="17:30">5:30 PM</option>
-                                            <option value="17:45">5:45 PM</option>
-                                            <option value="18:00">6:00 PM</option>
-                                            <option value="18:15">6:15 PM</option>
-                                            <option value="18:30">6:30 PM</option>
-                                            <option value="18:45">6:45 PM</option>
-                                            <option value="19:00">7:00 PM</option>
-                                            <option value="19:15">7:15 PM</option>
-                                            <option value="19:30">7:30 PM</option>
-                                            <option value="19:45">7:45 PM</option>
+                                            {#each timeOptions as option}
+                                                <option value={option.value}>{option.label}</option>
+                                            {/each}
                                         </select>
                                     </div>
                                     {#if formErrors.time}
@@ -652,6 +756,91 @@
                                     {/if}
                                 </div>
                             </div>
+
+                            <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                                <div>
+                                    <div class="flex justify-between">
+                                        <label for="end-date" class="block text-sm font-medium leading-6 text-gray-900">End Date</label>
+                                        {#if calculatedEndTime && selectedServices.length > 0}
+                                            <span class="text-xs text-gray-500">Auto-calculated</span>
+                                        {/if}
+                                    </div>
+                                    <div class="mt-2">
+                                        <input 
+                                            type="date" 
+                                            id="end-date" 
+                                            name="end-date" 
+                                            disabled={!!(calculatedEndTime && selectedServices.length > 0)}
+                                            class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 {calculatedEndTime && selectedServices.length > 0 ? 'bg-gray-100' : ''}"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between">
+                                        <label for="end-time-display" class="block text-sm font-medium leading-6 text-gray-900">End Time</label>
+                                        {#if calculatedEndTime && selectedServices.length > 0}
+                                            <button 
+                                                type="button" 
+                                                class="text-indigo-600 hover:text-indigo-900 text-xs font-medium"
+                                                on:click={() => {
+                                                    // Enable manual override
+                                                    const endDateInput = document.getElementById('end-date') as HTMLInputElement;
+                                                    if (endDateInput) {
+                                                        endDateInput.disabled = false;
+                                                        endDateInput.classList.remove('bg-gray-100');
+                                                    }
+                                                }}
+                                            >
+                                                Edit manually
+                                            </button>
+                                        {/if}
+                                    </div>
+                                    <div class="mt-2">
+                                        {#if calculatedEndTime && selectedServices.length > 0}
+                                            <div class="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 bg-gray-100 sm:text-sm sm:leading-6">
+                                                {calculatedEndTime}
+                                            </div>
+                                        {:else}
+                                            <select
+                                                id="end-time-display"
+                                                name="end-time-display"
+                                                class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            >
+                                                <option value="">Select a time</option>
+                                                {#each timeOptions as option}
+                                                    <option value={option.value}>{option.label}</option>
+                                                {/each}
+                                            </select>
+                                        {/if}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {#if date && time}
+                                <div class="mt-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                                    <h3 class="text-sm font-medium text-gray-900 mb-2">Appointment Summary</h3>
+                                    <dl class="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+                                        <div class="sm:col-span-1">
+                                            <dt class="text-sm font-normal text-gray-500">Start Time:</dt>
+                                            <dd class="text-sm font-medium text-gray-900">{formattedDateTime}</dd>
+                                        </div>
+                                        <div class="sm:col-span-1">
+                                            <dt class="text-sm font-normal text-gray-500">End Time:</dt>
+                                            <dd class="text-sm font-medium text-gray-900">
+                                                {#if selectedServices.length > 0}
+                                                    {calculateEndTimeString(date, time, getSelectedServicesDurationMinutes())}
+                                                {:else}
+                                                    Not calculated (no services selected)
+                                                {/if}
+                                            </dd>
+                                        </div>
+                                        <div class="sm:col-span-2">
+                                            <dt class="text-sm font-normal text-gray-500">Duration:</dt>
+                                            <dd class="text-sm font-medium text-gray-900">{getSelectedServicesDuration() || 'No services selected'}</dd>
+                                        </div>
+                                    </dl>
+                                </div>
+                            {/if}
 
                             <div class="sm:col-span-6">
                                 <label for="notes" class="block text-sm font-medium leading-6 text-gray-900">Notes</label>
@@ -691,6 +880,10 @@
                                     <div class="flex justify-between">
                                         <dt class="text-sm font-normal text-gray-500">Date/Time:</dt>
                                         <dd class="text-sm font-medium text-gray-900">{formattedDateTime}</dd>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <dt class="text-sm font-normal text-gray-500">End Time:</dt>
+                                        <dd class="text-sm font-medium text-gray-900">{calculatedEndTime}</dd>
                                     </div>
                                 </dl>
                             </div>
