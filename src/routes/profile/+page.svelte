@@ -392,13 +392,17 @@
     }
 </script>
 
-<div class="py-6 bg-gray-50 min-h-screen">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen bg-gray-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <CommandInput />
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6 gap-4">
-            <div>
-                <h1 class="text-3xl font-bold text-gray-900">Your Profile</h1>
-                <p class="mt-1 text-sm text-gray-500">Manage your business information and preferences</p>
+        
+        <!-- Header with Gradient Background -->
+        <div class="bg-gradient-to-r from-indigo-100 to-purple-100 backdrop-blur-sm rounded-xl mb-8 p-6 shadow-lg border border-indigo-200 mt-6">
+            <div class="flex flex-col sm:flex-row gap-4 justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-indigo-800">Your Profile</h1>
+                    <p class="mt-2 text-sm text-indigo-600">Manage your profile and business information</p>
+                </div>
             </div>
         </div>
 

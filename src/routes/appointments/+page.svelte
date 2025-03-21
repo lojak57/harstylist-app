@@ -721,61 +721,66 @@
     });
 </script>
 
-<div class="py-6 bg-gray-50 min-h-screen">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen bg-gray-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <CommandInput />
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6 gap-4">
-            <div>
-                <h1 class="text-3xl font-bold text-gray-900">Your Appointments</h1>
-                <p class="mt-1 text-sm text-gray-500">Schedule and manage client appointments</p>
-            </div>
-            <div class="flex space-x-3">
-                <div class="inline-flex rounded-md shadow-sm" role="group">
+        
+        <!-- Header with Gradient Background -->
+        <div class="bg-gradient-to-r from-indigo-100 to-purple-100 backdrop-blur-sm rounded-xl mb-8 p-6 shadow-lg border border-indigo-200 mt-6">
+            <div class="flex flex-col sm:flex-row gap-4 justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-indigo-800">Your Appointments</h1>
+                    <p class="mt-2 text-sm text-indigo-600">Schedule and manage client appointments</p>
+                </div>
+                <div class="flex space-x-3">
+                    <div class="inline-flex rounded-md shadow-sm" role="group">
+                        <button
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium {viewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} border border-gray-300 rounded-l-md focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            on:click={() => {
+                                viewMode = 'calendar';
+                                showList = false;
+                            }}
+                        >
+                            <div class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                                </svg>
+                                Calendar
+                            </div>
+                        </button>
+                        <button 
+                            type="button"
+                            class="px-4 py-2 text-sm font-medium {viewMode === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} border border-gray-300 rounded-r-md focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            on:click={() => {
+                                viewMode = 'list';
+                                showList = true;
+                            }}
+                        >
+                            <div class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                                </svg>
+                                List
+                            </div>
+                        </button>
+                    </div>
                     <button
                         type="button"
-                        class="px-4 py-2 text-sm font-medium {viewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} border border-gray-300 rounded-l-md focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                         on:click={() => {
-                            viewMode = 'calendar';
+                            showForm = true;
                             showList = false;
+                            initializeFormDates();
+                            currentStep = 1;
                         }}
+                        class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                     >
-                        <div class="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                            </svg>
-                            Calendar
-                        </div>
-                    </button>
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium {viewMode === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} border border-gray-300 rounded-r-md focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        on:click={() => {
-                            viewMode = 'list';
-                            showList = true;
-                        }}
-                    >
-                        <div class="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                            </svg>
-                            List
-                        </div>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                        Add Appointment
                     </button>
                 </div>
-                <button
-                    on:click={() => {
-                        showForm = true;
-                        showList = false;
-                        initializeFormDates();
-                        currentStep = 1;
-                    }}
-                    class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    Add Appointment
-                </button>
             </div>
         </div>
         {#if error}

@@ -5,6 +5,7 @@
     import { format } from 'date-fns';
 
     let appointments = [];
+    let clients = [];
     let rawData = [];
     let now = new Date();
     let nowISO = now.toISOString();
@@ -24,7 +25,10 @@
     let loading = false;
     let error = null;
     
-    onMount(fetchAppointments);
+    onMount(() => {
+        fetchAppointments();
+        fetchClients();
+    });
     
     async function fetchAppointments() {
         try {
@@ -72,6 +76,30 @@
         } catch (e) {
             error = e.message;
             console.error('Error fetching appointments:', e);
+        } finally {
+            loading = false;
+        }
+    }
+
+    async function fetchClients() {
+        try {
+            loading = true;
+            error = null;
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            
+            const { data, error: fetchError } = await supabase
+                .from('clients')
+                .select('*')
+                .eq('stylist_id', user.id);
+                
+            if (fetchError) throw fetchError;
+            
+            clients = data || [];
+        } catch (e) {
+            error = e.message;
+            console.error('Error fetching clients:', e);
         } finally {
             loading = false;
         }
@@ -184,6 +212,72 @@
             loading = false;
         }
     }
+
+    async function clearAllClients() {
+        if (!confirm('Are you sure you want to delete ALL clients? This cannot be undone!')) return;
+        
+        try {
+            loading = true;
+            error = null;
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Not authenticated');
+            
+            console.log('Starting client deletion process...');
+            
+            // 1. First, get all client IDs to ensure we delete all related records
+            const { data: clientsData, error: clientsFetchError } = await supabase
+                .from('clients')
+                .select('id')
+                .eq('stylist_id', user.id);
+                
+            if (clientsFetchError) throw clientsFetchError;
+            
+            if (clientsData && clientsData.length > 0) {
+                console.log(`Found ${clientsData.length} clients to delete`);
+                const clientIds = clientsData.map(client => client.id);
+                
+                // 2. Delete all appointments for these clients
+                const { error: appointmentDeleteError } = await supabase
+                    .from('appointments')
+                    .delete()
+                    .in('client_id', clientIds);
+                    
+                if (appointmentDeleteError) throw appointmentDeleteError;
+                console.log('Deleted all appointments for these clients');
+                
+                // 3. Delete all entries from client_services junction table
+                const { error: clientServicesDeleteError } = await supabase
+                    .from('client_services')
+                    .delete()
+                    .in('client_id', clientIds);
+                    
+                if (clientServicesDeleteError) throw clientServicesDeleteError;
+                console.log('Deleted all client_services relationships');
+                
+                // 4. Finally delete the clients themselves
+                const { error: deleteError } = await supabase
+                    .from('clients')
+                    .delete()
+                    .in('id', clientIds);
+                    
+                if (deleteError) throw deleteError;
+                console.log('Deleted all clients successfully');
+            } else {
+                console.log('No clients found to delete');
+            }
+            
+            await fetchClients();
+            await fetchAppointments(); // Refresh appointments list as well
+            alert('All clients and their appointments deleted successfully');
+        } catch (e) {
+            error = e.message;
+            console.error('Error deleting clients:', e);
+            alert(`Error: ${error}`);
+        } finally {
+            loading = false;
+        }
+    }
     
     function generateLocalTimes() {
         // Generate start and end times for today at 10:00 AM and 11:00 AM
@@ -272,23 +366,25 @@
         {/if}
     </div>
     
-    <div class="mb-4">
+    <div class="mb-8">
         <h2 class="text-xl font-semibold mb-4">Appointment Data Analysis</h2>
-        <button 
-            on:click={fetchAppointments}
-            class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 mb-4"
-            disabled={loading}
-        >
-            {loading ? 'Loading...' : 'Refresh Appointments'}
-        </button>
-        
-        <button 
-            on:click={clearAllAppointments}
-            class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 mb-4"
-            disabled={loading}
-        >
-            {loading ? 'Deleting...' : 'Clear All Appointments'}
-        </button>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button 
+                on:click={fetchAppointments}
+                class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
+                disabled={loading}
+            >
+                {loading ? 'Loading...' : 'Refresh Appointments'}
+            </button>
+            
+            <button 
+                on:click={clearAllAppointments}
+                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+                disabled={loading}
+            >
+                {loading ? 'Deleting...' : 'Clear All Appointments'}
+            </button>
+        </div>
         
         {#if error}
             <div class="p-3 bg-red-100 text-red-800 rounded mb-4">{error}</div>
@@ -337,6 +433,56 @@
                                         Delete
                                     </button>
                                 </td>
+                            </tr>
+                        {/each}
+                    {/if}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="mb-8">
+        <h2 class="text-xl font-semibold mb-4">Client Data Management</h2>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button 
+                on:click={fetchClients}
+                class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
+                disabled={loading}
+            >
+                {loading ? 'Loading...' : 'Refresh Clients'}
+            </button>
+            
+            <button 
+                on:click={clearAllClients}
+                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+                disabled={loading}
+            >
+                {loading ? 'Deleting...' : 'Clear All Clients'}
+            </button>
+        </div>
+        
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white border rounded-lg overflow-hidden">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="p-3 text-left">Name</th>
+                        <th class="p-3 text-left">Email</th>
+                        <th class="p-3 text-left">Phone</th>
+                        <th class="p-3 text-left">Created At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {#if clients.length === 0}
+                        <tr>
+                            <td colspan="4" class="p-4 text-center text-gray-500">No clients found</td>
+                        </tr>
+                    {:else}
+                        {#each clients as client}
+                            <tr class="border-t hover:bg-gray-50">
+                                <td class="p-3">{client.name}</td>
+                                <td class="p-3">{client.email || '-'}</td>
+                                <td class="p-3">{client.phone || '-'}</td>
+                                <td class="p-3">{client.created_at ? new Date(client.created_at).toLocaleString() : '-'}</td>
                             </tr>
                         {/each}
                     {/if}

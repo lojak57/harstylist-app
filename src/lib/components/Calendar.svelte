@@ -238,12 +238,11 @@
     }
 
     // Handle appointment clicked
-    async function handleAppointmentClick(appointment: Appointment, event: MouseEvent) {
-        if (isDragging) return;
-        event.stopPropagation();
-        event.preventDefault();
-
-        console.log('Appointment clicked:', appointment);
+    async function handleAppointmentClick(appointment: Appointment, event: MouseEvent | null = null) {
+        // Prevent bubbling to avoid triggering time slot click
+        if (event) event.stopPropagation();
+        
+        // Dispatch event for parent component to handle
         dispatch('appointmentClick', { appointment });
     }
 

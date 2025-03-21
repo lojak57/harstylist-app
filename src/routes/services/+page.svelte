@@ -65,58 +65,64 @@
     }
 </script>
 
-<div class="py-6 bg-gray-50 min-h-screen">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen bg-gray-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <CommandInput />
         
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6 gap-4">
-            <div>
-                <h1 class="text-3xl font-bold text-gray-900">Your Services</h1>
-                <p class="mt-1 text-sm text-gray-500">Manage your service offerings and pricing</p>
-            </div>
-            <div>
-                <button
-                    on:click={() => goto('/services/new')}
+        <!-- Header with Gradient Background -->
+        <div class="bg-gradient-to-r from-indigo-100 to-purple-100 backdrop-blur-sm rounded-xl mb-8 p-6 shadow-lg border border-indigo-200 mt-6">
+            <div class="flex flex-col sm:flex-row gap-4 justify-between items-center">
+                <h1 class="text-2xl font-bold text-indigo-800">Your Services</h1>
+                <a
+                    href="/services/new"
                     class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
                     Add Service
-                </button>
+                </a>
             </div>
+            <p class="mt-2 text-sm text-indigo-600">Create and manage your service offerings</p>
         </div>
 
         {#if error}
-            <div class="mt-4 p-4 text-sm text-red-700 bg-red-100 rounded-lg" transition:fade>{error}</div>
+            <div in:fade={{ duration: 250 }} class="rounded-md bg-red-50 p-4 mb-6 shadow-sm">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm font-medium text-red-800">{error}</p>
+                    </div>
+                </div>
+            </div>
         {/if}
 
         {#if loading}
-            <div class="mt-8 flex justify-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+            <div class="flex justify-center items-center h-64">
+                <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-indigo-500"></div>
             </div>
         {:else if services.length === 0}
-            <div class="mt-6 text-center py-12 bg-white rounded-lg shadow">
-                <svg class="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+            <div in:fade={{ duration: 250 }} class="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-200">
+                <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
                 <h3 class="mt-2 text-sm font-medium text-gray-900">No services</h3>
-                <p class="mt-1 text-sm text-gray-500">Get started by adding a new service.</p>
+                <p class="mt-1 text-sm text-gray-500">Get started by creating a new service.</p>
                 <div class="mt-6">
-                    <button
-                        type="button"
-                        on:click={() => goto('/services/new')}
-                        class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                        <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                    <a href="/services/new" class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                        <svg class="-ml-0.5 mr-1.5 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
                         </svg>
-                        New Service
-                    </button>
+                        Add Service
+                    </a>
                 </div>
             </div>
         {:else}
-            <div in:fade={{ duration: 250 }} class="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div in:fade={{ duration: 250 }} class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {#each services as service (service.id)}
                     <div class="bg-white overflow-hidden shadow rounded-lg border border-gray-200 hover:shadow-md transition-all duration-200">
                         <div class="px-4 py-5 sm:p-6">

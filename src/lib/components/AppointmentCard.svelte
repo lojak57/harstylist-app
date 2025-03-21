@@ -1,49 +1,71 @@
 <script lang="ts">
-    import { formatSalonTime, parseDateToLuxon } from '$lib/utils/timeUtils';
     import { createEventDispatcher } from 'svelte';
-    import type { Appointment } from '$lib/types';
     import { DateTime } from 'luxon';
-
-    const dispatch = createEventDispatcher<{
-        click: { event: MouseEvent };
-        dragStart: { appointment: Appointment; event: MouseEvent };
-    }>();
-
+    import type { Appointment } from '$lib/types';
+    import { onMount } from 'svelte';
+    import { goto } from '$app/navigation';
+    
+    const dispatch = createEventDispatcher();
+    
     export let appointment: Appointment;
-    export let view: 'day' | 'week' | 'month' = 'week';
+    export let view: 'month' | 'week' | 'day' = 'month';
     export let style: string = '';
     export let isDragging: boolean = false;
 
-    // Safely get client name
-    $: clientName = appointment.client?.name || 'Unknown';
-    $: clientInitial = clientName !== 'Unknown' ? clientName[0].toUpperCase() : 'U';
+    // Extract client data from the appointment
+    let clientData: any = null;
+    let clientName = 'Unknown';
+    let clientInitial = 'U';
+    let serviceName = appointment.service_type || 'No service specified';
     
-    // Log client information for debugging
-    $: {
-        console.log('Appointment client data:', appointment.client);
-        console.log('Client name being used:', clientName);
+    onMount(() => {
+        console.log('AppointmentCard mounted with appointment:', appointment);
+        updateClientData();
+    });
+    
+    // Function to extract client data - only use the client property, not clients
+    function updateClientData() {
+        if (appointment && appointment.client) {
+            clientData = appointment.client;
+            console.log('Client data found:', clientData);
+            
+            // Update client name and initial based on the extracted data
+            if (clientData && clientData.name) {
+                clientName = clientData.name;
+                clientInitial = clientName.charAt(0).toUpperCase();
+                console.log('Set client name to:', clientName);
+            } else {
+                clientName = 'Unknown';
+                clientInitial = 'U';
+                console.log('Using default Unknown client name');
+            }
+        } else {
+            console.log('No client data found in appointment:', appointment);
+            clientName = 'Unknown';
+            clientInitial = 'U';
+        }
+    }
+    
+    // React when appointment changes
+    $: if (appointment) {
+        console.log('Appointment changed in AppointmentCard:', appointment);
+        updateClientData();
+        serviceName = appointment.service_type || 'No service specified';
     }
 
     // Format start and end times
-    $: startTime = parseDateToLuxon(appointment.start_time);
-    $: endTime = parseDateToLuxon(appointment.end_time);
-    $: formattedStartTime = formatSalonTime(startTime.toJSDate(), 'h:mm a');
-    $: formattedEndTime = formatSalonTime(endTime.toJSDate(), 'h:mm a');
-
-    // Calculate duration in minutes
-    $: durationMinutes = endTime.diff(startTime, 'minutes').minutes;
-    $: formattedDuration = `Duration: ${Math.round(durationMinutes)} min`;
-
-    // For dragging
-    function handleDragStart(event: MouseEvent) {
-        event.stopPropagation();
-        dispatch('dragStart', { appointment, event });
-    }
-
-    // Handle appointment click
+    $: startTime = DateTime.fromISO(appointment.start_time, { zone: 'America/Denver' }).toFormat('h:mm a');
+    $: endTime = DateTime.fromISO(appointment.end_time, { zone: 'America/Denver' }).toFormat('h:mm a');
+    
     function handleClick(event: MouseEvent) {
-        event.stopPropagation();
+        // Navigate to appointment detail page
+        goto(`/appointments/${appointment.id}`);
         dispatch('click', { event });
+    }
+    
+    // Simplified drag start handler without dataTransfer
+    function handleDragStart() {
+        dispatch('dragStart', { appointmentId: appointment.id });
     }
 </script>
 
@@ -57,10 +79,11 @@
         on:keypress={(e) => e.key === 'Enter' && handleClick(e as unknown as MouseEvent)}
         tabindex="0"
         role="button"
-        aria-label="Appointment with {clientName} at {formattedStartTime}"
+        aria-label="Appointment with {clientName} at {startTime}"
     >
         <div class="appointment-client-initial">{clientInitial}</div>
         <div class="appointment-client-name">{clientName}</div>
+        <div class="appointment-service-name">{serviceName}</div>
     </div>
 {:else}
     <!-- Week/day view with more details -->
@@ -72,14 +95,15 @@
         on:keypress={(e) => e.key === 'Enter' && handleClick(e as unknown as MouseEvent)}
         tabindex="0"
         role="button"
-        aria-label="Appointment with {clientName} at {formattedStartTime}"
+        aria-label="Appointment with {clientName} at {startTime}"
     >
         <div class="appointment-content">
-            <div class="appointment-time">{formattedStartTime}</div>
+            <div class="appointment-time">{startTime}</div>
             <div class="client-badge">
                 <span>{clientInitial}</span>
             </div>
             <div class="appointment-client-name">{clientName}</div>
+            <div class="appointment-service-name">{serviceName}</div>
         </div>
     </div>
 {/if}
@@ -166,5 +190,14 @@
         font-weight: bold;
         font-size: 10px;
         margin-right: 2px;
+    }
+    
+    .appointment-service-name {
+        font-size: 10px;
+        text-align: center;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 </style>
