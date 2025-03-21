@@ -4,6 +4,7 @@
     import StyleGuideCard from '$lib/components/StyleGuideCard.svelte';
     import ServiceCard from '$lib/components/ServiceCard.svelte';
     import BusinessHoursSelector from '$lib/components/BusinessHoursSelector.svelte';
+    import CommandInput from '$lib/components/CommandInput.svelte';
     import { fade, fly } from 'svelte/transition';
 
     let stylist: Stylist | null = null;
@@ -391,14 +392,22 @@
     }
 </script>
 
-<div class="py-6">
+<div class="py-6 bg-gray-50 min-h-screen">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <CommandInput />
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">Your Profile</h1>
+                <p class="mt-1 text-sm text-gray-500">Manage your business information and preferences</p>
+            </div>
+        </div>
+
         {#if error}
-            <div class="mt-4 p-4 text-sm text-red-700 bg-red-100 rounded-lg">{error}</div>
+            <div class="mt-4 p-4 text-sm text-red-700 bg-red-100 rounded-lg" transition:fade>{error}</div>
         {/if}
 
         {#if stylist}
-            <div class="md:flex md:items-center md:justify-between md:space-x-5">
+            <div class="mt-6 md:flex md:items-center md:justify-between md:space-x-5">
                 <div class="flex items-start space-x-5">
                     <!-- Profile Image -->
                     <div class="flex-shrink-0">

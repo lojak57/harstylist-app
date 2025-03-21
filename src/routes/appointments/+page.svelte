@@ -10,9 +10,10 @@
     import { createLocalDate, localToStorageFormat, storageToLocalDate, debugDate, parseDateToLuxon, formatSalonTime } from '$lib/utils/timeUtils';
     import type { Appointment, Client, Service } from '$lib/types';
     import type { Database } from '$lib/supabase';
+    import { page } from '$app/stores';
 
     type AppointmentFromDB = Database['public']['Tables']['appointments']['Row'];
-    type AppointmentWithClient = AppointmentFromDB & { client: { name: string; email?: string; phone?: string; }; };
+    type AppointmentWithClient = AppointmentFromDB & { client: { id: string; name: string; email?: string; phone?: string; }; };
     
     // Form state management
     let loading = false;
@@ -23,14 +24,21 @@
     
     // Core page states
     let showForm = false;
-    let showList = true;
+    let showList = false;
     let viewMode: 'calendar' | 'list' = 'calendar';
 
     // Appointment data
     let appointments: AppointmentWithClient[] = [];
     let clients: { id: string; name: string; email?: string; phone?: string; }[] = [];
-    let services: { id: string; name: string; duration: string; price?: number; }[] = [];
+    let services: Service[] = [];
+    let searchQuery = '';
+    let filteredClients: { id: string; name: string; email?: string; phone?: string; }[] = [];
     
+    // Function to update filtered clients based on search query
+    function updateFilteredClients() {
+        filteredClients = clients.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    }
+
     // Form fields
     let selectedClientId = '';
     // Initialize form fields with today's date
@@ -49,12 +57,8 @@
     let endDate = ''; // Same day as start date by default
     let endTimeValue = ''; // 30 minutes after start by default
     let notes = '';
-    let selectedServices: { id: string; name: string; duration: string; price?: number; }[] = [];
+    let selectedServices: Service[] = [];
     let calculatedDurationMinutes = 30; // Default to 30 minutes
-    
-    // Client search
-    let searchQuery = '';
-    let filteredClients: any[] = [];
 
     // Calendar
     let calendarView: 'week' | 'day' = 'week';
@@ -88,7 +92,7 @@
         { value: '19:30', label: '7:30 PM' },
         { value: '20:00', label: '8:00 PM' },
     ];
-    
+
     // Helper function to parse duration strings
     function parseDuration(durationStr: string) {
         if (!durationStr) return 30;
@@ -127,7 +131,7 @@
 
     // Initialize the form with today's date
     function resetForm() {
-        selectedClientId = '';
+        // Do not reset client ID, it should be preserved if needed
         selectedServices = [];
         initializeFormDates();
         notes = '';
@@ -135,12 +139,23 @@
         formErrors = {};
     }
 
-    function toggleForm() {
+    function toggleForm(eventOrPreserve?: MouseEvent | boolean) {
+        // Determine if we should preserve the client ID
+        // If a boolean is passed, use it directly. Otherwise, it's an event and we don't preserve
+        const preserveClientId = typeof eventOrPreserve === 'boolean' ? eventOrPreserve : false;
+        
         if (!showForm) {
-            // Reset the form when opening it
+            // When opening the form, only reset certain fields
             resetForm();
+            // Only clear client ID if we're not preserving it
+            if (!preserveClientId) {
+                selectedClientId = '';
+            }
             showForm = true;
         } else {
+            // When closing, reset everything including client ID
+            resetForm();
+            selectedClientId = '';
             showForm = false;
         }
     }
@@ -189,9 +204,13 @@
             selectedServices.forEach(service => {
                 console.log('Service found:', service);
                 console.log('Service duration raw:', service.duration);
-                const minutes = parseDuration(service.duration);
+                
+                // Handle undefined duration by defaulting to 30 minutes
+                const durationValue = service.duration || '30 minutes';
+                const minutes = parseDuration(durationValue);
+                
+                console.log(`Parsed duration for ${service.name}: ${minutes} minutes`);
                 totalMinutes += minutes;
-                console.log(`Added ${minutes} minutes for service: ${service.name}, total now: ${totalMinutes}`);
             });
         } else {
             // Default to 30 minutes if no services selected
@@ -549,13 +568,14 @@
     }
 
     // Function to handle appointment clicks in the calendar
-    function handleAppointmentClick(event: CustomEvent<{id: string}>) {
-        const appointmentId = event.detail.id;
-        if (appointmentId) {
-            goto(`/appointments/${appointmentId}`);
+    async function handleAppointmentClick(event: CustomEvent<{ appointment: Appointment }>) {
+        const appointment = event.detail.appointment;
+        if (appointment && appointment.id) {
+            // Navigate to appointment detail page
+            goto(`/appointments/${appointment.id}`);
         }
     }
-
+    
     function formatDateTime(dateStr: string) {
         return DateTime.fromISO(dateStr).toLocaleString(DateTime.DATETIME_FULL);
     }
@@ -567,72 +587,62 @@
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Not authenticated');
 
-            // Get appointments with client information using a join
-            let { data, error: appointmentError } = await supabase
+            // DIRECT AND SIMPLIFIED APPROACH: Get all appointments first
+            const { data: appointmentsData, error: appointmentError } = await supabase
                 .from('appointments')
-                .select(`
-                    id,
-                    client_id,
-                    stylist_id,
-                    service_type,
-                    start_time,
-                    end_time,
-                    notes,
-                    created_at,
-                    clients(id, name, email, phone)
-                `)
+                .select('*')
                 .eq('stylist_id', user.id)
                 .order('start_time', { ascending: true });
-
+                
             if (appointmentError) throw appointmentError;
             
-            // Process appointments to ensure client is the correct shape
-            appointments = (data || []).map(apt => {
-                // Extract the client from the nested array that Supabase returns
-                // Ensure we always have a proper client object to avoid 'Unknown' display issues
-                const client = apt.clients && apt.clients.length > 0 
-                    ? {
-                        id: apt.clients[0].id || apt.client_id,
-                        name: apt.clients[0].name || 'Unknown', 
-                        email: apt.clients[0].email || '',
-                        phone: apt.clients[0].phone || ''
-                      }
-                    : { id: apt.client_id, name: 'Unknown', email: '', phone: '' };
+            // Now separately get ALL clients
+            const { data: allClients, error: clientsError } = await supabase
+                .from('clients')
+                .select('*');
                 
-                // Calculate duration in minutes for display
+            if (clientsError) throw clientsError;
+                
+            // Create a map of clients by ID for easy lookup
+            const clientsById: Record<string, any> = {};
+            if (allClients) {
+                allClients.forEach(client => {
+                    if (client && client.id) {
+                        clientsById[client.id] = client;
+                    }
+                });
+            }
+            
+            console.log('All clients:', allClients);
+            console.log('Clients by ID map:', clientsById);
+            
+            // Process appointments with explicit client assignment
+            appointments = (appointmentsData || []).map(apt => {
+                // Get the matching client using client_id
+                const clientId = apt.client_id;
+                let client = null;
+                
+                if (clientId && clientsById[clientId]) {
+                    client = clientsById[clientId];
+                    console.log(`Found client for appointment ${apt.id}:`, client);
+                } else {
+                    console.log(`No client found for appointment ${apt.id} with client_id ${clientId}`);
+                }
+                
+                // Calculate duration in minutes
                 const startTime = DateTime.fromISO(apt.start_time, { zone: 'America/Denver' });
                 const endTime = DateTime.fromISO(apt.end_time, { zone: 'America/Denver' });
                 const durationMinutes = endTime.diff(startTime, 'minutes').minutes;
                 
-                // Log client data for debugging
-                console.log(`Appointment ${apt.id} client:`, client);
-                
+                // Create a clean appointment with explicit client object
                 return {
                     ...apt,
-                    client,  // Ensure client is properly structured
-                    duration: durationMinutes,
-                    // Remove the clients array to avoid confusion
-                    clients: undefined
+                    client, // Directly set the client object
+                    duration: durationMinutes
                 };
             });
-
-            console.log('Fetched appointments:', appointments);
             
-            // For debugging, log a sample appointment with timezone information
-            if (appointments.length > 0) {
-                const sample = appointments[0];
-                console.log('===== APPOINTMENT TIMEZONE DEBUG =====');
-                console.log('Raw appointment from DB:', sample);
-                
-                // Convert using Luxon
-                const startInSalonTZ = DateTime.fromISO(sample.start_time, { zone: 'UTC' }).setZone('America/Denver');
-                const endInSalonTZ = DateTime.fromISO(sample.end_time, { zone: 'UTC' }).setZone('America/Denver');
-                
-                console.log('Start time in salon timezone:', startInSalonTZ.toLocaleString(DateTime.DATETIME_FULL));
-                console.log('End time in salon timezone:', endInSalonTZ.toLocaleString(DateTime.DATETIME_FULL));
-                console.log('Browser timezone:', Intl.DateTimeFormat().resolvedOptions().timeZone);
-                console.log('===== END TIMEZONE DEBUG =====');
-            }
+            console.log('Final processed appointments:', appointments);
         } catch (e: unknown) { // Type assertion to access error properties
             console.error('Error fetching appointments:', e);
             error = e instanceof Error ? e.message : 'Unknown error';
@@ -672,8 +682,30 @@
         }
     }
 
-    function updateFilteredClients() {
-        filteredClients = clients.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    let clientParam: string | null = null;
+    let autoOpenParam: string | null = null;
+
+    // Track URL parameters with Svelte reactivity
+    $: {
+        clientParam = $page.url.searchParams.get('client');
+        autoOpenParam = $page.url.searchParams.get('autoOpen');
+        
+        // If client parameter exists, set the selected client immediately
+        if (clientParam) {
+            console.log('Setting client ID from URL param:', clientParam);
+            selectedClientId = clientParam;
+        }
+        
+        // If autoOpen is true and the form isn't already open, open it
+        if (autoOpenParam === 'true' && !showForm) {
+            console.log('Auto-opening form from URL param');
+            // Show the form first before any resets to ensure it's visible
+            showForm = true;
+            // Only reset the form fields, not the client ID
+            initializeFormDates();
+            selectedServices = [];
+            notes = '';
+        }
     }
 
     onMount(async () => {
@@ -694,30 +726,58 @@
         <CommandInput />
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6 gap-4">
             <div>
-                <h1 class="text-3xl font-bold text-gray-900">Appointments</h1>
-                <p class="mt-1 text-sm text-gray-500">Manage your client appointments</p>
+                <h1 class="text-3xl font-bold text-gray-900">Your Appointments</h1>
+                <p class="mt-1 text-sm text-gray-500">Schedule and manage client appointments</p>
             </div>
             <div class="flex space-x-3">
+                <div class="inline-flex rounded-md shadow-sm" role="group">
+                    <button
+                        type="button"
+                        class="px-4 py-2 text-sm font-medium {viewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} border border-gray-300 rounded-l-md focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        on:click={() => {
+                            viewMode = 'calendar';
+                            showList = false;
+                        }}
+                    >
+                        <div class="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                            </svg>
+                            Calendar
+                        </div>
+                    </button>
+                    <button
+                        type="button"
+                        class="px-4 py-2 text-sm font-medium {viewMode === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} border border-gray-300 rounded-r-md focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        on:click={() => {
+                            viewMode = 'list';
+                            showList = true;
+                        }}
+                    >
+                        <div class="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                            </svg>
+                            List
+                        </div>
+                    </button>
+                </div>
                 <button
-                    on:click={() => showList = !showList}
-                    class="inline-flex items-center gap-x-1.5 rounded-md bg-white px-3.5 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 {showList ? 'text-indigo-600' : 'text-gray-400'}">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3.5v16.5m0 0h10.5a2.25 2.25 0 0 0 2.25-2.25v-12a2.25 2.25 0 0 0-2.25-2.25H6.75" />
-                    </svg>
-                    {showList ? 'Show Calendar' : 'Show List'}
-                </button>
-                <button
-                    on:click={toggleForm}
+                    on:click={() => {
+                        showForm = true;
+                        showList = false;
+                        initializeFormDates();
+                        currentStep = 1;
+                    }}
                     class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
-                    {showForm ? 'Cancel' : 'New Appointment'}
+                    Add Appointment
                 </button>
             </div>
         </div>
-
         {#if error}
             <div class="mt-4 rounded-md bg-red-50 p-4">
                 <div class="flex">
@@ -979,7 +1039,7 @@
                         initialDate={selectedDate} 
                         {appointments} 
                         on:appointmentMoved={updateAppointment}
-                        on:editAppointment={handleAppointmentClick}
+                        on:appointmentClick={handleAppointmentClick}
                     />
                 </div>
             </div>
