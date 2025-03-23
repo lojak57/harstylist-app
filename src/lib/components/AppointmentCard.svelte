@@ -98,12 +98,16 @@
         aria-label="Appointment with {clientName} at {startTime}"
     >
         <div class="appointment-content">
-            <div class="appointment-time">{startTime}</div>
-            <div class="client-badge">
-                <span>{clientInitial}</span>
+            <div class="appointment-header">
+                <div class="client-badge">
+                    <span>{clientInitial}</span>
+                </div>
+                <div class="appointment-time">{startTime}</div>
             </div>
-            <div class="appointment-client-name">{clientName}</div>
-            <div class="appointment-service-name">{serviceName}</div>
+            <div class="appointment-details">
+                <div class="appointment-client-name">{clientName}</div>
+                <div class="appointment-service-name">{serviceName}</div>
+            </div>
         </div>
     </div>
 {/if}
@@ -132,7 +136,7 @@
         overflow: hidden;
         position: absolute;
         font-size: 12px;
-        width: 60px;  /* Skinny vertical cards */
+        width: calc(100% - 8px);  /* Fill the entire width of the day column with small margin */
         z-index: 10;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
         cursor: pointer;
@@ -153,28 +157,36 @@
     .appointment-content {
         display: flex;
         flex-direction: column;
-        align-items: center;
-        padding: 4px;
+        padding: 6px;
         height: 100%;
         box-sizing: border-box;
+    }
+    
+    .appointment-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
     }
     
     .appointment-time {
         font-weight: 500;
         font-size: 11px;
-        margin-bottom: 2px;
-        text-align: center;
+    }
+    
+    .appointment-details {
+        display: flex;
+        flex-direction: column;
     }
     
     .client-badge {
-        width: 24px;
-        height: 24px;
+        width: 20px;
+        height: 20px;
         border-radius: 50%;
         background-color: rgba(255, 255, 255, 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
-        margin: 2px 0;
     }
     
     .appointment-client-name {

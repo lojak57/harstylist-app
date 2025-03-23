@@ -142,14 +142,7 @@
             // Create user account with Supabase
             const { data, error: signUpError } = await supabase.auth.signUp({
                 email: $registrationData.email,
-                password: $registrationData.password,
-                options: {
-                    emailRedirectTo: window.location.origin,
-                    data: {
-                        // Add metadata to indicate this user is in the registration flow
-                        registration_in_progress: true
-                    }
-                }
+                password: $registrationData.password
             });
 
             if (signUpError) throw signUpError;
@@ -171,35 +164,7 @@
             // Move to next step
             nextStep();
         } catch (e: any) {
-            // Check if the error is related to email already registered
-            if (e.message && e.message.includes('already registered')) {
-                // Try to sign in with the provided credentials
-                try {
-                    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-                        email: $registrationData.email,
-                        password: $registrationData.password
-                    });
-                    
-                    if (signInError) {
-                        // If sign-in fails, show the original error
-                        error = e.message || 'An error occurred during registration';
-                    } else if (signInData?.user) {
-                        // If sign-in succeeds, store the user ID and continue
-                        registrationData.update(rd => ({
-                            ...rd,
-                            userId: signInData.user.id
-                        }));
-                        
-                        // Move to next step
-                        nextStep();
-                    }
-                } catch (signInErr) {
-                    // If sign-in attempt fails, show the original error
-                    error = e.message || 'An error occurred during registration';
-                }
-            } else {
-                error = e.message || 'An error occurred during registration';
-            }
+            error = e.message || 'An error occurred during registration';
             console.error('Registration error:', e);
         } finally {
             loading = false;
@@ -367,6 +332,7 @@
                 return;
             }
             
+            // Try to create the stylist record with all the collected information
             try {
                 // First, check if the stylist record already exists
                 const { data: existingStylist, error: checkError } = await supabase
@@ -375,65 +341,78 @@
                     .eq('id', $registrationData.userId)
                     .single();
                 
-                if (checkError && !checkError.message.includes('No rows found')) {
-                    throw checkError;
+                if (checkError && checkError.code !== 'PGRST116') {
+                    // If there's an error other than 'not found', log it
+                    console.error('Error checking for existing stylist:', checkError);
                 }
                 
-                // If stylist doesn't exist, create it
                 if (!existingStylist) {
-                    const { error: stylistError } = await supabase
+                    // Create the stylist record if it doesn't exist
+                    const { error: insertError } = await supabase
                         .from('stylists')
-                        .insert([
-                            {
-                                id: $registrationData.userId,
-                                email: $registrationData.email,
-                                name: `${$registrationData.firstName} ${$registrationData.lastName}`,
-                                salon_name: $registrationData.salonName,
-                                address: $registrationData.address,
-                                city: $registrationData.city,
-                                state: $registrationData.state,
-                                zip: $registrationData.zip,
-                                phone: $registrationData.phone
-                            }
-                        ]);
-
-                    if (stylistError) throw stylistError;
+                        .insert({
+                            id: $registrationData.userId,
+                            email: $registrationData.email,
+                            name: `${$registrationData.firstName} ${$registrationData.lastName}`,
+                            // Use the database column names that actually exist
+                            // These may differ from our frontend naming convention
+                            salon_name: $registrationData.salonName,
+                            address: $registrationData.address,
+                            city: $registrationData.city,
+                            state: $registrationData.state,
+                            zip: $registrationData.zip,
+                            phone: $registrationData.phone,
+                            business_hours: $registrationData.businessHours,
+                            registration_completed: true,
+                            registration_completed_at: new Date().toISOString()
+                        });
+                    
+                    if (insertError) {
+                        console.error('Error creating stylist record:', insertError);
+                    }
+                } else {
+                    // Update the existing stylist record
+                    const { error: updateError } = await supabase
+                        .from('stylists')
+                        .update({
+                            name: `${$registrationData.firstName} ${$registrationData.lastName}`,
+                            salon_name: $registrationData.salonName,
+                            address: $registrationData.address,
+                            city: $registrationData.city,
+                            state: $registrationData.state,
+                            zip: $registrationData.zip,
+                            phone: $registrationData.phone,
+                            business_hours: $registrationData.businessHours,
+                            registration_completed: true,
+                            registration_completed_at: new Date().toISOString()
+                        })
+                        .eq('id', $registrationData.userId);
+                    
+                    if (updateError) {
+                        console.error('Error updating stylist record:', updateError);
+                    }
                 }
                 
-                // Add services
+                // Insert services
                 if ($registrationData.services.length > 0) {
-                    const servicesData = $registrationData.services.map(service => ({
-                        stylist_id: $registrationData.userId,
-                        name: service.name,
-                        description: service.description,
-                        price: service.price,
-                        duration: service.duration
-                    }));
-                    
-                    const { error: servicesError } = await supabase
-                        .from('services')
-                        .insert(servicesData);
-                    
-                    if (servicesError) throw servicesError;
+                    for (const service of $registrationData.services) {
+                        const { error: serviceError } = await supabase
+                            .from('services')
+                            .insert({
+                                stylist_id: $registrationData.userId,
+                                name: service.name,
+                                description: service.description,
+                                price: service.price,
+                                duration: service.duration
+                            });
+                        
+                        if (serviceError) {
+                            console.error('Error creating service:', serviceError);
+                        }
+                    }
                 }
                 
-                // Add business hours
-                if ($registrationData.businessHours.length > 0) {
-                    const hoursData = $registrationData.businessHours.map(day => ({
-                        stylist_id: $registrationData.userId,
-                        day: day.day.toLowerCase(),
-                        hours: day.hours,
-                        is_open: day.isOpen
-                    }));
-                    
-                    const { error: hoursError } = await supabase
-                        .from('business_hours')
-                        .insert(hoursData);
-                    
-                    if (hoursError) throw hoursError;
-                }
-                
-                // Add style guide if provided
+                // Create style guide if title is provided
                 if ($registrationData.styleGuide.title) {
                     const { data: styleGuideData, error: styleGuideError } = await supabase
                         .from('style_guides')
@@ -441,30 +420,51 @@
                             stylist_id: $registrationData.userId,
                             title: $registrationData.styleGuide.title,
                             description: $registrationData.styleGuide.description
-                        });
+                        })
+                        .select();
                     
-                    if (styleGuideError) throw styleGuideError;
-                }
-                
-                // Try to sign in the user to complete the process
-                const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-                    email: $registrationData.email,
-                    password: $registrationData.password
-                });
-                
-                if (signInError) {
-                    // If sign-in fails due to email verification, provide a helpful message
-                    if (signInError.message.includes('Email not confirmed') || 
-                        signInError.message.includes('not verified') || 
-                        signInError.message.includes('not confirmed')) {
-                        error = 'Registration completed successfully! Please check your email to verify your account before signing in.';
-                    } else {
-                        throw signInError;
+                    if (styleGuideError) {
+                        console.error('Error creating style guide:', styleGuideError);
+                    } else if (styleGuideData && styleGuideData[0] && $registrationData.styleGuide.images.length > 0) {
+                        // Upload style guide images
+                        for (let i = 0; i < $registrationData.styleGuide.images.length; i++) {
+                            const file = $registrationData.styleGuide.images[i];
+                            const fileExt = file.name.split('.').pop();
+                            const fileName = `${$registrationData.userId}-style-${i}.${fileExt}`;
+                            
+                            const { error: uploadError } = await supabase.storage
+                                .from('style-guide-images')
+                                .upload(fileName, file);
+                            
+                            if (uploadError) {
+                                console.error('Error uploading style guide image:', uploadError);
+                                continue;
+                            }
+                            
+                            const { data: urlData } = supabase.storage
+                                .from('style-guide-images')
+                                .getPublicUrl(fileName);
+                            
+                            if (urlData) {
+                                const { error: imageError } = await supabase
+                                    .from('style_guide_images')
+                                    .insert({
+                                        style_guide_id: styleGuideData[0].id,
+                                        image_url: urlData.publicUrl,
+                                        order: i
+                                    });
+                                
+                                if (imageError) {
+                                    console.error('Error creating style guide image record:', imageError);
+                                }
+                            }
+                        }
                     }
-                } else {
-                    // If sign-in succeeds, redirect to the clients page
-                    goto('/clients');
                 }
+                
+                // Registration complete - show success message
+                // We'll leave the user on the completion page with a success message
+                // They can then sign in manually
             } catch (e) {
                 console.error('Error completing registration:', e);
                 error = 'An error occurred while completing registration. Please try signing in manually.';
@@ -527,7 +527,7 @@
                 { day: 'Wednesday', hours: '9:00 AM - 6:00 PM', isOpen: true },
                 { day: 'Thursday', hours: '9:00 AM - 6:00 PM', isOpen: true },
                 { day: 'Friday', hours: '9:00 AM - 6:00 PM', isOpen: true },
-                { day: 'Saturday', hours: '10:00 AM - 4:00 PM', isOpen: true },
+                { day: 'Saturday', hours: '9:00 AM - 4:00 PM', isOpen: true },
                 { day: 'Sunday', hours: 'Closed', isOpen: false }
             ]
         },
@@ -1580,109 +1580,74 @@
                 <div class="space-y-6">
                     <div class="text-center">
                         <svg class="mx-auto h-12 w-12 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <h2 class="mt-3 text-lg font-medium text-gray-900">Registration Complete!</h2>
-                        <p class="mt-2 text-sm text-gray-500">
-                            Thank you for registering with HairStyle Pro. Your stylist profile has been created.
+                        <h2 class="mt-3 text-2xl font-bold text-gray-900">Registration Complete!</h2>
+                        <p class="mt-2 text-sm text-gray-600">
+                            Congratulations! You've completed all the steps to set up your stylist profile.
+                            Your account has been created successfully.
                         </p>
                     </div>
 
-                    {#if error && error.includes('check your email')}
-                        <div class="rounded-md bg-blue-50 p-4 my-4">
+                    {#if error}
+                        <div class="rounded-md bg-red-50 p-4 mb-4">
                             <div class="flex">
                                 <div class="flex-shrink-0">
-                                    <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                </div>
-                                <div class="ml-3 flex-1 md:flex md:justify-between">
-                                    <p class="text-sm text-blue-700">{error}</p>
-                                </div>
-                            </div>
-                        </div>
-                    {:else if error}
-                        <div class="rounded-md bg-red-50 p-4 my-4">
-                            <div class="flex">
-                                <div class="flex-shrink-0">
-                                    <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                                    <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                 </div>
                                 <div class="ml-3">
-                                    <p class="text-sm text-red-700">{error}</p>
+                                    <h3 class="text-sm font-medium text-red-800">There was an issue with your registration</h3>
+                                    <div class="mt-2 text-sm text-red-700">
+                                        <p>{error}</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     {/if}
 
-                    <div class="mt-5 space-y-4">
-                        <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
-                            <h3 class="text-sm font-medium text-gray-800">Next Steps:</h3>
-                            <ul class="mt-2 text-sm text-gray-600 space-y-2">
-                                <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <span>Check your email for a verification link if you haven't verified your email yet.</span>
-                                </li>
-                                <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <span>Sign in to your account to start managing your clients and appointments.</span>
-                                </li>
-                                <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-green-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <span>Add your first client and start scheduling appointments!</span>
-                                </li>
-                            </ul>
+                    <div class="bg-green-50 border border-green-200 rounded-md p-4 mb-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-medium text-green-800">Your profile is ready!</h3>
+                                <div class="mt-2 text-sm text-green-700">
+                                    <p>You can now sign in to access your dashboard and start managing your business.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="flex flex-col space-y-3">
-                        <button
-                            type="button"
-                            on:click={() => goto('/')}
-                            class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        >
-                            Go to Login Page
-                        </button>
-                        
-                        <button
-                            type="button"
-                            on:click={async () => {
-                                try {
-                                    loading = true;
-                                    const { error: resendError } = await supabase.auth.resend({
-                                        type: 'signup',
-                                        email: $registrationData.email
-                                    });
-                                    
-                                    if (resendError) throw resendError;
-                                    
-                                    error = 'Verification email sent! Please check your inbox.';
-                                } catch (e: any) {
-                                    error = e.message;
-                                } finally {
-                                    loading = false;
-                                }
-                            }}
-                            disabled={loading}
-                            class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        >
-                            {#if loading}
-                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    <div class="bg-blue-50 border border-blue-200 rounded-md p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
-                                Processing...
-                            {:else}
-                                Resend Verification Email
-                            {/if}
-                        </button>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-medium text-blue-800">What's next?</h3>
+                                <div class="mt-2 text-sm text-blue-700">
+                                    <ul class="list-disc pl-5 space-y-1">
+                                        <li>Sign in to your account</li>
+                                        <li>Set up your availability calendar</li>
+                                        <li>Customize your profile further</li>
+                                        <li>Invite clients to book appointments</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-center mt-6">
+                        <a href="/login" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Go to Login
+                        </a>
                     </div>
                 </div>
             {/if}

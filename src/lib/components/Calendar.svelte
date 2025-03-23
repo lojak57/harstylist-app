@@ -163,9 +163,8 @@
                 const height = Math.max(30, durationMinutes * pixelsPerMinute); // Minimum 30px
                 
                 if (view === 'week') {
-                    // Align with the left margin of the day column
-                    // No need for complex calculation, the parent element already has the correct position
-                    return `position: absolute; top: ${topPosition}px; height: ${height}px; left: 0;`;
+                    // Position with a small margin from the left edge
+                    return `position: absolute; top: ${topPosition}px; height: ${height}px; left: 4px; right: 4px;`;
                 } else { // day view
                     return `position: absolute; top: ${topPosition}px; height: ${height}px; left: 0;`;
                 }

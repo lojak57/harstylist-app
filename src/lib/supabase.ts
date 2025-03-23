@@ -3,8 +3,15 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 
 // Create Supabase client with environment variables
 export const supabase = createClient(
-    PUBLIC_SUPABASE_URL || '',
-    PUBLIC_SUPABASE_ANON_KEY || ''
+    PUBLIC_SUPABASE_URL,
+    PUBLIC_SUPABASE_ANON_KEY,
+    {
+        auth: {
+            autoRefreshToken: true,
+            persistSession: true,
+            detectSessionInUrl: true
+        }
+    }
 );
 
 export type Database = {
