@@ -10,7 +10,7 @@
         appointmentMoved: { appointment: Appointment; newStartTime: string; newEndTime: string };
         editAppointment: { id: string };
         createAppointment: { startDate: DateTime };
-        appointmentClick: { appointment: Appointment };
+        appointmentClick: { appointment: Appointment; event: MouseEvent | null };
     }>();
 
     export let initialDate = new Date();
@@ -236,172 +236,657 @@
         return (minutes / 60) * 100;
     }
 
-    // Handle appointment clicked
-    async function handleAppointmentClick(appointment: Appointment, event: MouseEvent | null = null) {
-        // Prevent bubbling to avoid triggering time slot click
-        if (event) event.stopPropagation();
+    // Function to handle appointment clicks in the calendar
+    function handleAppointmentClick(appointment: Appointment, event: MouseEvent | null) {
+        // Don't trigger click if we're dragging
+        if (isDragging) return;
         
-        // Dispatch event for parent component to handle
-        dispatch('appointmentClick', { appointment });
+        // Emit event to parent component
+        dispatch('appointmentClick', { appointment, event });
     }
 
-    // Drag and drop functionality
+    // Variables to track drag state
     let isDragging = false;
     let draggedAppointment: Appointment | null = null;
-    let overlayAppointment: Appointment | null = null;
-    let dragOverlay: HTMLElement | null = null;
-    let currentX = 0;
-    let heightPerMinute = 1; // Will be calculated based on business hours
-    let originalTop = 0;
-    let originalLeft = 0;
-    let dayColumnWidth = 0;
-
-    // For drag and drop
-    function handleDragStart(appointment: Appointment, event: MouseEvent | TouchEvent) {
-        if (!browser) return;
-        
-        event.preventDefault();
-
-        // Set up dragging state
-        isDragging = true;
-        draggedAppointment = appointment;
-        
-        // Create a clone of the appointment for the overlay
-        overlayAppointment = {...appointment};
-        
-        // Set up the drag overlay
-        const target = event.target as HTMLElement;
-        const rect = target.getBoundingClientRect();
-        
-        originalTop = rect.top;
-        originalLeft = rect.left;
-        dayColumnWidth = rect.width;
-        
-        // Create the drag overlay
-        dragOverlay = document.createElement('div');
-        dragOverlay.className = 'drag-overlay';
-        dragOverlay.style.position = 'fixed';
-        dragOverlay.style.top = rect.top + 'px';
-        dragOverlay.style.left = rect.left + 'px';
-        dragOverlay.style.width = rect.width + 'px';
-        dragOverlay.style.height = rect.height + 'px';
-        dragOverlay.style.backgroundColor = 'rgba(66, 153, 225, 0.8)';
-        dragOverlay.style.borderRadius = '4px';
-        dragOverlay.style.zIndex = '1000';
-        dragOverlay.style.pointerEvents = 'none';
-        dragOverlay.style.transition = 'none';
-        dragOverlay.style.opacity = '0.7';
-        
-        // Add text to the overlay
-        const titleElement = document.createElement('div');
-        titleElement.textContent = appointment.client?.name || 'Appointment';
-        titleElement.style.padding = '4px';
-        titleElement.style.fontSize = '12px';
-        titleElement.style.fontWeight = 'bold';
-        titleElement.style.color = 'white';
-        titleElement.style.overflow = 'hidden';
-        titleElement.style.whiteSpace = 'nowrap';
-        titleElement.style.textOverflow = 'ellipsis';
-        
-        dragOverlay.appendChild(titleElement);
-        document.body.appendChild(dragOverlay);
-        
-        // Set up event handlers
-        const handleMouseMove = (moveEvent: MouseEvent) => {
-            if (!isDragging || !dragOverlay) return;
-            
-            const dy = moveEvent.clientY - (event instanceof MouseEvent ? event.clientY : 0);
-            
-            // Update position
-            dragOverlay.style.top = (originalTop + dy) + 'px';
-            
-            // Prevent dragging outside of week view
-            if (weekView) {
-                const weekViewRect = weekView.getBoundingClientRect();
-                if (moveEvent.clientY < weekViewRect.top) {
-                    dragOverlay.style.top = weekViewRect.top + 'px';
-                } else if (moveEvent.clientY > weekViewRect.bottom) {
-                    dragOverlay.style.top = (weekViewRect.bottom - parseInt(dragOverlay.style.height)) + 'px';
-                }
-            }
-        };
-        
-        const handleMouseUp = () => {
-            handleDragEnd();
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-        
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-    }
-
-    function handleDragEnd() {
-        if (!isDragging || !draggedAppointment || !overlayAppointment) return;
-
-        if (!dragOverlay) {
-            console.error('dragOverlay is null');
-            return;
-        }
-
-        // Clean up
-        document.body.removeChild(dragOverlay);
-        dragOverlay = null;
-        isDragging = false;
-        draggedAppointment = null;
-        overlayAppointment = null;
-    }
-
+    let originalAppointment: Appointment | null; // Store the original appointment
     let dragStartY = 0;
+    let mouseOffsetY = 0; // Track the offset where the mouse clicked within the appointment
     let dragStartHour = 0;
     let dragStartMinute = 0;
     let dragStartDay: DateTime | null = null;
+    let dragOverlay: HTMLElement | null = null;
+    let originalRect: DOMRect | null = null;
+    let initialMinutesSinceDayStart = 0;
+    
+    // Add resize-related state variables
+    let isResizing = false; 
+    let resizeHandle: 'top' | 'bottom' | null = null;
+    let resizeStartY = 0;
+    let resizedAppointment: Appointment | null = null;
 
+    // Handle appointment drag start
     function handleAppointmentDragStart(event: CustomEvent<{appointment: Appointment, event: MouseEvent}>) {
         const { appointment, event: mouseEvent } = event.detail;
         
+        // Store the original appointment data
+        originalAppointment = { ...appointment };
+        
+        // Mark the appointment as being dragged
         isDragging = true;
-        draggedAppointment = {...appointment};
+        draggedAppointment = { ...appointment };
         dragStartY = mouseEvent.clientY;
         
-        // Get the time values
+        // Get the time values from the appointment
         const startDate = parseDateToLuxon(appointment.start_time);
         dragStartHour = startDate.hour;
         dragStartMinute = startDate.minute;
         dragStartDay = startDate.startOf('day');
         
+        console.log('Starting drag from time:', startDate.toFormat('h:mm a'));
+        
+        // Get the original appointment element
+        if (mouseEvent.target instanceof Element) {
+            const originalAppointmentElement = mouseEvent.target.closest('.appointment, .month-appointment');
+            if (originalAppointmentElement) {
+                // Store the exact dimensions and position of the original appointment
+                originalRect = originalAppointmentElement.getBoundingClientRect();
+                
+                // Calculate the mouse offset within the appointment
+                mouseOffsetY = mouseEvent.clientY - originalRect.top;
+                
+                // Create a drag overlay based on the original element's exact position
+                createDragOverlay(appointment, originalRect);
+                
+                // Calculate and store the initial position data for dragging reference
+                const weekViewRect = weekView?.getBoundingClientRect();
+                if (weekViewRect) {
+                    const dayHeaderElement = document.querySelector('.day-header');
+                    const headerHeight = dayHeaderElement ? dayHeaderElement.getBoundingClientRect().height : 0;
+                    
+                    // Store the grid position for the original appointment
+                    const hourHeight = 60;
+                    const minuteHeight = hourHeight / 60;
+                    initialMinutesSinceDayStart = (dragStartHour - businessHours.start) * 60 + dragStartMinute;
+                }
+            }
+        }
+        
+        // Add the mouse event listeners
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
     }
     
-    // Handle mouse movement during drag
-    function handleMouseMove(event: MouseEvent) {
-        if (!isDragging || !draggedAppointment || !dragStartDay) return;
+    // Create the drag overlay
+    function createDragOverlay(appointment: Appointment, rect: DOMRect) {
+        // Create a div for the drag overlay
+        dragOverlay = document.createElement('div');
+        dragOverlay.className = 'appointment-drag-overlay';
         
-        const cellHeight = 60; // Height of each hour cell in pixels
+        // Set styles for fixed positioning at the original position
+        dragOverlay.style.position = 'fixed';
+        dragOverlay.style.top = `${rect.top}px`;
+        dragOverlay.style.left = `${rect.left}px`;
+        dragOverlay.style.width = `${rect.width}px`;
+        dragOverlay.style.height = `${rect.height}px`;
+        dragOverlay.style.backgroundColor = '#3498db'; // Default blue color for all appointments
+        dragOverlay.style.borderRadius = '4px';
+        dragOverlay.style.padding = '4px 8px';
+        dragOverlay.style.boxSizing = 'border-box';
+        dragOverlay.style.zIndex = '1000';
+        dragOverlay.style.opacity = '0.8';
+        dragOverlay.style.color = '#fff';
+        dragOverlay.style.overflow = 'hidden';
+        dragOverlay.style.display = 'flex';
+        dragOverlay.style.flexDirection = 'column';
+        
+        // Add the client name
+        const clientName = document.createElement('div');
+        clientName.className = 'client-name';
+        if (appointment.client?.name) {
+            clientName.textContent = appointment.client.name;
+            clientName.style.fontWeight = 'bold';
+        }
+        dragOverlay.appendChild(clientName);
+        
+        // Add the time display
+        const timeDisplay = document.createElement('div');
+        timeDisplay.className = 'time-display';
+        if (timeDisplay instanceof HTMLElement) {
+            timeDisplay.style.fontSize = '10px';
+            timeDisplay.style.marginTop = 'auto';
+            
+            // Format and display the time
+            const startTime = parseDateToLuxon(appointment.start_time);
+            const endTime = parseDateToLuxon(appointment.end_time);
+            timeDisplay.textContent = `${startTime.toFormat('h:mm a')} - ${endTime.toFormat('h:mm a')}`;
+        }
+        dragOverlay.appendChild(timeDisplay);
+        
+        // Append the overlay to the body
+        document.body.appendChild(dragOverlay);
+        
+        return dragOverlay;
+    }
+    
+    // Handle mouse movement during drag or resize
+    function handleMouseMove(event: MouseEvent) {
+        if (isDragging && dragOverlay) {
+            // Calculate vertical movement
+            const deltaY = event.clientY - dragStartY;
+            
+            // Update overlay position directly based on mouse movement
+            if (originalRect) {
+                // Simply move the overlay by the amount the mouse has moved
+                dragOverlay.style.top = `${originalRect.top + deltaY}px`;
+            }
+            
+            // During the drag, we'll just update the visual time display
+            // without actually calculating the final appointment times
+            updateDragTimeDisplay(event);
+        }
+        else if (isResizing && dragOverlay && resizeHandle && resizedAppointment && originalAppointment && originalRect) {
+            // Handle resizing logic
+            const deltaY = event.clientY - resizeStartY;
+            
+            // Update the overlay shape based on which handle is being dragged
+            if (resizeHandle === 'top') {
+                // Resize from the top - adjust top position and height
+                const newTop = originalRect.top + deltaY;
+                const newHeight = originalRect.height - deltaY;
+                
+                // Don't allow the appointment to become too small (minimum 15 min)
+                const minHeight = 15; // 15 pixels represents 15 minutes
+                if (newHeight >= minHeight) {
+                    dragOverlay.style.top = `${newTop}px`;
+                    dragOverlay.style.height = `${newHeight}px`;
+                }
+            } else if (resizeHandle === 'bottom') {
+                // Resize from the bottom - just adjust height
+                const newHeight = originalRect.height + deltaY;
+                
+                // Don't allow the appointment to become too small (minimum 15 min)
+                const minHeight = 15; // 15 pixels represents 15 minutes
+                if (newHeight >= minHeight) {
+                    dragOverlay.style.height = `${newHeight}px`;
+                }
+            }
+            
+            // Update the time display based on the new dimensions
+            updateResizeTimeDisplay(event);
+        }
+    }
+    
+    // Update just the time display during drag without changing the appointment times yet
+    function updateDragTimeDisplay(event: MouseEvent) {
+        if (!draggedAppointment || !dragStartDay || !originalAppointment || !dragOverlay) return;
+        
+        // Get the week view element to calculate relative positions
+        const weekViewRect = weekView?.getBoundingClientRect();
+        if (!weekViewRect) return;
+        
+        // Get the header height to offset calculations
+        const dayHeaderElement = document.querySelector('.day-header');
+        const headerHeight = dayHeaderElement ? dayHeaderElement.getBoundingClientRect().height : 0;
+        
+        // Each hour is 60px tall
+        const hourHeight = 60;
+        const minuteHeight = hourHeight / 60;
+        
+        // Calculate vertical movement
         const deltaY = event.clientY - dragStartY;
         
-        // Calculate hour offset based on pixel movement (60px = 1 hour)
-        const hourOffset = Math.floor(deltaY / cellHeight);
+        // Convert movement to time change
+        const minutesChange = Math.round(deltaY / minuteHeight);
         
-        // Update preview
-        // Implementation would depend on your specific requirements
-        console.log(`Dragging appointment by ${hourOffset} hours`);
+        // Calculate new time from original time
+        const originalStartTime = parseDateToLuxon(originalAppointment.start_time);
+        let newStartTime = originalStartTime.plus({ minutes: minutesChange });
+        
+        // Snap to nearest 15-minute interval
+        const snapInterval = 15;
+        const minuteValue = newStartTime.minute;
+        const remainder = minuteValue % snapInterval;
+        
+        if (remainder > 0) {
+            // Round to nearest 15 min
+            const snapMinutes = remainder < (snapInterval / 2) 
+                ? -remainder 
+                : (snapInterval - remainder);
+            
+            newStartTime = newStartTime.plus({ minutes: snapMinutes });
+        }
+        
+        // Ensure we're within business hours
+        if (newStartTime.hour < businessHours.start) {
+            newStartTime = newStartTime.set({ hour: businessHours.start, minute: 0 });
+        } else if (newStartTime.hour >= businessHours.end) {
+            newStartTime = newStartTime.set({ hour: businessHours.end - 1, minute: 45 }); // Last 15-minute slot
+        }
+        
+        // Calculate new end time for display
+        const originalEndTime = parseDateToLuxon(originalAppointment.end_time);
+        const durationMinutes = originalEndTime.diff(originalStartTime, 'minutes').minutes;
+        const newEndTime = newStartTime.plus({ minutes: durationMinutes });
+        
+        // Only update the time display in the overlay, not the appointment times yet
+        const timeDisplay = dragOverlay.querySelector('.time-display');
+        if (timeDisplay instanceof HTMLElement) {
+            timeDisplay.textContent = `${newStartTime.toFormat('h:mm a')} - ${newEndTime.toFormat('h:mm a')}`;
+        }
     }
     
     // Handle mouse up to complete drag
-    function handleMouseUp(event: MouseEvent) {
-        if (isDragging && draggedAppointment) {
-            // Finalize the appointment move
-            // Implementation would depend on your specific requirements
-            console.log('Drag ended, appointment would be updated here');
+    function finalizeAppointmentTime(event: MouseEvent) {
+        if (!draggedAppointment || !dragStartDay || !originalAppointment) return;
+        
+        // Get the week view element to calculate relative positions
+        const weekViewRect = weekView?.getBoundingClientRect();
+        if (!weekViewRect) return;
+        
+        // Get the header height to offset calculations
+        const dayHeaderElement = document.querySelector('.day-header');
+        const headerHeight = dayHeaderElement ? dayHeaderElement.getBoundingClientRect().height : 0;
+        
+        // Each hour is 60px tall in our grid
+        const hourHeight = 60;
+        const minuteHeight = hourHeight / 60;
+        
+        // Calculate vertical movement
+        const deltaY = event.clientY - dragStartY;
+        
+        // Convert movement to time change
+        const minutesChange = Math.round(deltaY / minuteHeight);
+        
+        // Calculate new time from original time
+        const originalStartTime = parseDateToLuxon(originalAppointment.start_time);
+        let newStartTime = originalStartTime.plus({ minutes: minutesChange });
+        
+        // Snap to nearest 15-minute interval
+        const snapInterval = 15;
+        const minuteValue = newStartTime.minute;
+        const remainder = minuteValue % snapInterval;
+        
+        if (remainder > 0) {
+            // Round to nearest 15 min
+            const snapMinutes = remainder < (snapInterval / 2) 
+                ? -remainder 
+                : (snapInterval - remainder);
+            
+            newStartTime = newStartTime.plus({ minutes: snapMinutes });
         }
         
-        // Reset drag state
+        // Ensure we're within business hours
+        if (newStartTime.hour < businessHours.start) {
+            newStartTime = newStartTime.set({ hour: businessHours.start, minute: 0 });
+        } else if (newStartTime.hour >= businessHours.end) {
+            newStartTime = newStartTime.set({ hour: businessHours.end - 1, minute: 45 }); // Last 15-minute slot
+        }
+        
+        // Calculate new end time  
+        const originalEndTime = parseDateToLuxon(originalAppointment.end_time);
+        const durationMinutes = originalEndTime.diff(originalStartTime, 'minutes').minutes;
+        const newEndTime = newStartTime.plus({ minutes: durationMinutes });
+        
+        // Update the appointment times
+        draggedAppointment.start_time = newStartTime.toISO() as string;
+        draggedAppointment.end_time = newEndTime.toISO() as string;
+    }
+    
+    // Handle appointment resize start
+    function handleAppointmentResizeStart(detail: {appointment: Appointment, event: MouseEvent, handle: 'top' | 'bottom'}) {
+        const { appointment, event: mouseEvent, handle } = detail;
+        
+        // Store the original appointment data
+        originalAppointment = { ...appointment };
+        
+        // Store resize specific state
+        isResizing = true;
+        resizeHandle = handle;
+        resizedAppointment = { ...appointment };
+        resizeStartY = mouseEvent.clientY;
+        
+        console.log(`Starting resize from ${handle} handle for:`, appointment.id);
+        
+        // Get the original appointment element
+        if (mouseEvent.target instanceof Element) {
+            const originalAppointmentElement = mouseEvent.target.closest('.appointment, .month-appointment');
+            if (originalAppointmentElement) {
+                // Store the exact dimensions and position of the original appointment
+                originalRect = originalAppointmentElement.getBoundingClientRect();
+                
+                // Create a resize overlay based on the original element's exact position
+                createResizeOverlay(appointment, originalRect, handle);
+                
+                // Add event listeners for resizing
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+            }
+        }
+    }
+    
+    // Create a resize overlay
+    function createResizeOverlay(appointment: Appointment, rect: DOMRect, handle: 'top' | 'bottom') {
+        // Create a div for the resize overlay - similar to drag overlay
+        dragOverlay = document.createElement('div');
+        dragOverlay.className = 'resize-overlay';
+        dragOverlay.style.position = 'fixed';
+        dragOverlay.style.zIndex = '1000';
+        dragOverlay.style.left = `${rect.left}px`;
+        dragOverlay.style.top = `${rect.top}px`;
+        dragOverlay.style.width = `${rect.width}px`;
+        dragOverlay.style.height = `${rect.height}px`;
+        dragOverlay.style.backgroundColor = '#dbeafe';
+        dragOverlay.style.borderLeft = '3px solid #3b82f6';
+        dragOverlay.style.borderRadius = '3px';
+        dragOverlay.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+        dragOverlay.style.pointerEvents = 'none'; // Don't block mouse events
+        
+        // Add a resizing indicator
+        dragOverlay.style.borderColor = '#ef4444';
+        
+        // Add a time display
+        const timeDisplay = document.createElement('div');
+        timeDisplay.className = 'time-display';
+        timeDisplay.style.padding = '0.25rem';
+        timeDisplay.style.fontWeight = 'bold';
+        timeDisplay.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+        timeDisplay.style.borderRadius = '2px';
+        timeDisplay.style.position = 'absolute';
+        timeDisplay.style.top = '2px';
+        timeDisplay.style.left = '2px';
+        timeDisplay.style.fontSize = '10px';
+        
+        // Calculate the display times
+        const startTime = parseDateToLuxon(appointment.start_time);
+        const endTime = parseDateToLuxon(appointment.end_time);
+        timeDisplay.textContent = `${startTime.toFormat('h:mm a')} - ${endTime.toFormat('h:mm a')}`;
+        
+        dragOverlay.appendChild(timeDisplay);
+        
+        // Append the overlay to the body
+        document.body.appendChild(dragOverlay);
+        
+        return dragOverlay;
+    }
+    
+    // Update the resize overlay time display
+    function updateResizeTimeDisplay(event: MouseEvent) {
+        if (!isResizing || !dragOverlay || !resizeHandle || !originalAppointment || !resizedAppointment) return;
+        
+        // Get the week view element to calculate relative positions
+        const weekViewRect = weekView?.getBoundingClientRect();
+        if (!weekViewRect) return;
+        
+        // Each hour is 60px tall in our grid
+        const hourHeight = 60;
+        const minuteHeight = hourHeight / 60;
+        
+        // Calculate vertical movement
+        const deltaY = event.clientY - resizeStartY;
+        
+        // Convert movement to minute changes (positive for moving down, negative for moving up)
+        const minutesChange = Math.round(deltaY / minuteHeight);
+        
+        // Get original times
+        const originalStartTime = parseDateToLuxon(originalAppointment.start_time);
+        const originalEndTime = parseDateToLuxon(originalAppointment.end_time);
+        
+        // Initialize new times from original
+        let newStartTime = originalStartTime;
+        let newEndTime = originalEndTime;
+        
+        // Update the appropriate time based on which handle is being dragged
+        if (resizeHandle === 'top') {
+            // Modifying start time
+            newStartTime = originalStartTime.plus({ minutes: minutesChange });
+            
+            // Snap to nearest 15-minute interval
+            const snapInterval = 15;
+            const minuteValue = newStartTime.minute;
+            const remainder = minuteValue % snapInterval;
+            
+            if (remainder > 0) {
+                // Round to nearest 15 min
+                const snapMinutes = remainder < (snapInterval / 2) 
+                    ? -remainder 
+                    : (snapInterval - remainder);
+                
+                newStartTime = newStartTime.plus({ minutes: snapMinutes });
+            }
+            
+            // Ensure we're within business hours
+            if (newStartTime.hour < businessHours.start) {
+                newStartTime = newStartTime.set({ hour: businessHours.start, minute: 0 });
+            }
+            
+            // Don't allow start time to be after or equal to end time
+            // Minimum appointment length is 15 minutes
+            const minAppointmentMinutes = 15;
+            if (newStartTime >= originalEndTime.minus({ minutes: minAppointmentMinutes })) {
+                newStartTime = originalEndTime.minus({ minutes: minAppointmentMinutes });
+            }
+            
+            // Keep end time the same, only update start time
+            newEndTime = originalEndTime;
+        } 
+        else if (resizeHandle === 'bottom') {
+            // Modifying end time
+            newEndTime = originalEndTime.plus({ minutes: minutesChange });
+            
+            // Snap to nearest 15-minute interval
+            const snapInterval = 15;
+            const minuteValue = newEndTime.minute;
+            const remainder = minuteValue % snapInterval;
+            
+            if (remainder > 0) {
+                // Round to nearest 15 min
+                const snapMinutes = remainder < (snapInterval / 2) 
+                    ? -remainder 
+                    : (snapInterval - remainder);
+                
+                newEndTime = newEndTime.plus({ minutes: snapMinutes });
+            }
+            
+            // Ensure we're within business hours
+            if (newEndTime.hour >= businessHours.end) {
+                newEndTime = newEndTime.set({ hour: businessHours.end, minute: 0 });
+            }
+            
+            // Don't allow end time to be before or equal to start time
+            // Minimum appointment length is 15 minutes
+            const minAppointmentMinutes = 15;
+            if (newEndTime <= originalStartTime.plus({ minutes: minAppointmentMinutes })) {
+                newEndTime = originalStartTime.plus({ minutes: minAppointmentMinutes });
+            }
+            
+            // Keep start time the same, only update end time
+            newStartTime = originalStartTime;
+        }
+        
+        // Update the time display in the overlay
+        if (dragOverlay) {
+            // Find the time display element
+            const timeDisplay = dragOverlay.querySelector('.time-display');
+            if (timeDisplay instanceof HTMLElement) {
+                timeDisplay.textContent = `${newStartTime.toFormat('h:mm a')} - ${newEndTime.toFormat('h:mm a')}`;
+            }
+        }
+    }
+    
+    // Handle mouse up for both dragging and resizing
+    function handleMouseUp(event: MouseEvent) {
+        if (isDragging && draggedAppointment && originalAppointment) {
+            // Finalize the drag
+            finalizeAppointmentTime(event);
+            
+            // Check if we actually moved the appointment
+            const originalStartTime = parseDateToLuxon(originalAppointment.start_time);
+            const newStartTime = parseDateToLuxon(draggedAppointment.start_time);
+            
+            // Only dispatch if the time actually changed
+            if (!originalStartTime.equals(newStartTime)) {
+                const newEndTime = parseDateToLuxon(draggedAppointment.end_time);
+                console.log('Appointment moved from', originalStartTime.toFormat('h:mm a'), 'to', newStartTime.toFormat('h:mm a'));
+                
+                // Dispatch event to handle the data update in the parent component
+                dispatch('appointmentMoved', {
+                    appointment: draggedAppointment,
+                    newStartTime: newStartTime.toISO() as string,
+                    newEndTime: newEndTime.toISO() as string
+                });
+            } else {
+                console.log('Appointment not moved - same time');
+            }
+        }
+        else if (isResizing && resizedAppointment && originalAppointment) {
+            // Finalize the resize
+            finalizeAppointmentResize(event);
+            
+            const originalStartTime = parseDateToLuxon(originalAppointment.start_time);
+            const originalEndTime = parseDateToLuxon(originalAppointment.end_time);
+            const newStartTime = parseDateToLuxon(resizedAppointment.start_time);
+            const newEndTime = parseDateToLuxon(resizedAppointment.end_time);
+            
+            // Only dispatch if the time actually changed
+            if (!originalStartTime.equals(newStartTime) || !originalEndTime.equals(newEndTime)) {
+                console.log('Appointment resized from', 
+                    `${originalStartTime.toFormat('h:mm a')} - ${originalEndTime.toFormat('h:mm a')}`,
+                    'to',
+                    `${newStartTime.toFormat('h:mm a')} - ${newEndTime.toFormat('h:mm a')}`);
+                
+                // Dispatch event to handle the data update in the parent component
+                dispatch('appointmentMoved', {
+                    appointment: resizedAppointment,
+                    newStartTime: newStartTime.toISO() as string,
+                    newEndTime: newEndTime.toISO() as string
+                });
+            } else {
+                console.log('Appointment not resized - same times');
+            }
+        }
+        
+        // Clean up regardless of what we were doing
+        cleanup();
+    }
+    
+    // Calculate the final appointment times after resizing
+    function finalizeAppointmentResize(event: MouseEvent) {
+        if (!isResizing || !resizeHandle || !dragOverlay || !resizedAppointment || !originalAppointment) return;
+        
+        // Get the week view element to calculate relative positions
+        const weekViewRect = weekView?.getBoundingClientRect();
+        if (!weekViewRect) return;
+        
+        // Each hour is 60px tall in our grid
+        const hourHeight = 60;
+        const minuteHeight = hourHeight / 60;
+        
+        // Calculate vertical movement
+        const deltaY = event.clientY - resizeStartY;
+        
+        // Convert movement to minute changes (positive for moving down, negative for moving up)
+        const minutesChange = Math.round(deltaY / minuteHeight);
+        
+        // Get original times
+        const originalStartTime = parseDateToLuxon(originalAppointment.start_time);
+        const originalEndTime = parseDateToLuxon(originalAppointment.end_time);
+        
+        // Initialize new times from original
+        let newStartTime = originalStartTime;
+        let newEndTime = originalEndTime;
+        
+        // Update the appropriate time based on which handle is being dragged
+        if (resizeHandle === 'top') {
+            // Modifying start time
+            newStartTime = originalStartTime.plus({ minutes: minutesChange });
+            
+            // Snap to nearest 15-minute interval
+            const snapInterval = 15;
+            const minuteValue = newStartTime.minute;
+            const remainder = minuteValue % snapInterval;
+            
+            if (remainder > 0) {
+                // Round to nearest 15 min
+                const snapMinutes = remainder < (snapInterval / 2) 
+                    ? -remainder 
+                    : (snapInterval - remainder);
+                
+                newStartTime = newStartTime.plus({ minutes: snapMinutes });
+            }
+            
+            // Ensure we're within business hours
+            if (newStartTime.hour < businessHours.start) {
+                newStartTime = newStartTime.set({ hour: businessHours.start, minute: 0 });
+            }
+            
+            // Don't allow start time to be after or equal to end time
+            // Minimum appointment length is 15 minutes
+            const minAppointmentMinutes = 15;
+            if (newStartTime >= originalEndTime.minus({ minutes: minAppointmentMinutes })) {
+                newStartTime = originalEndTime.minus({ minutes: minAppointmentMinutes });
+            }
+            
+            // Keep end time the same, only update start time
+            newEndTime = originalEndTime;
+        } 
+        else if (resizeHandle === 'bottom') {
+            // Modifying end time
+            newEndTime = originalEndTime.plus({ minutes: minutesChange });
+            
+            // Snap to nearest 15-minute interval
+            const snapInterval = 15;
+            const minuteValue = newEndTime.minute;
+            const remainder = minuteValue % snapInterval;
+            
+            if (remainder > 0) {
+                // Round to nearest 15 min
+                const snapMinutes = remainder < (snapInterval / 2) 
+                    ? -remainder 
+                    : (snapInterval - remainder);
+                
+                newEndTime = newEndTime.plus({ minutes: snapMinutes });
+            }
+            
+            // Ensure we're within business hours
+            if (newEndTime.hour >= businessHours.end) {
+                newEndTime = newEndTime.set({ hour: businessHours.end, minute: 0 });
+            }
+            
+            // Don't allow end time to be before or equal to start time
+            // Minimum appointment length is 15 minutes
+            const minAppointmentMinutes = 15;
+            if (newEndTime <= originalStartTime.plus({ minutes: minAppointmentMinutes })) {
+                newEndTime = originalStartTime.plus({ minutes: minAppointmentMinutes });
+            }
+            
+            // Keep start time the same, only update end time
+            newStartTime = originalStartTime;
+        }
+        
+        // Update the appointment times
+        resizedAppointment.start_time = newStartTime.toISO() as string;
+        resizedAppointment.end_time = newEndTime.toISO() as string;
+    }
+    
+    // Update the cleanup function for both dragging and resizing
+    function cleanup() {
+        // Clean up drag state
         isDragging = false;
         draggedAppointment = null;
+        dragStartDay = null;
         
-        // Remove event listeners
+        // Clean up resize state
+        isResizing = false;
+        resizeHandle = null;
+        resizedAppointment = null;
+        
+        // Remove the drag/resize overlay
+        if (dragOverlay) {
+            dragOverlay.remove();
+            dragOverlay = null;
+        }
+        
+        // Remove global event listeners
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
     }
@@ -484,7 +969,7 @@
                 
                 <!-- Day columns -->
                 {#each visibleDays as day, dayIndex}
-                    <div class="relative h-full" style="min-width: 0;">
+                    <div class="relative h-full day-column" style="min-width: 0;">
                         <div class={`day-header border-r border-b p-2 text-center bg-white sticky top-0 z-10 ${day.hasSame(DateTime.now(), 'day') ? 'today-cell' : ''}`}>
                             <div class="date-day">{day.toFormat('EEE')}</div>
                             <div class={`date-number ${day.hasSame(DateTime.now(), 'day') ? 'today-date' : ''}`}>{day.toFormat('d')}</div>
@@ -525,8 +1010,8 @@
                                 view="week" 
                                 style={getAppointmentStyle(appointment, dayIndex)}
                                 isDragging={isDragging && draggedAppointment?.id === appointment.id}
-                                on:click={(e) => handleAppointmentClick(appointment, e.detail.event)}
-                                on:dragStart
+                                on:dragStart={handleAppointmentDragStart}
+                                on:resizeStart={(e) => handleAppointmentResizeStart(e.detail)}
                             />
                         {/each}
                     </div>
@@ -584,8 +1069,8 @@
                             view="day" 
                             style={getAppointmentStyle(appointment)} 
                             isDragging={isDragging && draggedAppointment?.id === appointment.id}
-                            on:click={(e) => handleAppointmentClick(appointment, e.detail.event)}
-                            on:dragStart
+                            on:dragStart={handleAppointmentDragStart}
+                            on:resizeStart={(e) => handleAppointmentResizeStart(e.detail)}
                         />
                     {/each}
                 </div>
@@ -615,7 +1100,12 @@
                             <!-- Day's appointments -->
                             <div class="appointments-container flex flex-col gap-1 mt-1">
                                 {#each day.appointments.slice(0, 3) as appointment}
-                                    <svelte:component this={AppointmentCard} {appointment} view="month" />
+                                    <svelte:component 
+                                        this={AppointmentCard} 
+                                        {appointment} 
+                                        view="month" 
+                                        on:click={() => handleAppointmentClick(appointment, null)}
+                                    />
                                 {/each}
                                 
                                 {#if day.appointments.length > 3}
