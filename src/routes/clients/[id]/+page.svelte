@@ -222,7 +222,143 @@
                     </div>
                 {/if}
             </div>
-        {:else if !loading}
+
+            <!-- Client Portal Access Section -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mt-8">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    Client Portal Access
+                </h2>
+                
+                <div class="bg-gray-50 p-4 rounded-lg shadow-sm mb-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-900">Portal Status</p>
+                            <p class="text-sm text-gray-500 mt-1">
+                                {#if client.user_id}
+                                    Client has access to the portal
+                                {:else}
+                                    Client does not have portal access yet
+                                {/if}
+                            </p>
+                        </div>
+                        {#if client.user_id}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <svg class="-ml-0.5 mr-1.5 h-2 w-2 text-green-400" fill="currentColor" viewBox="0 0 8 8">
+                                    <circle cx="4" cy="4" r="3" />
+                                </svg>
+                                Active
+                            </span>
+                        {:else}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                <svg class="-ml-0.5 mr-1.5 h-2 w-2 text-gray-400" fill="currentColor" viewBox="0 0 8 8">
+                                    <circle cx="4" cy="4" r="3" />
+                                </svg>
+                                Inactive
+                            </span>
+                        {/if}
+                    </div>
+                </div>
+                
+                {#if !client.user_id}
+                    <div class="bg-gray-50 p-4 rounded-lg shadow-sm mb-4">
+                        <p class="text-sm font-medium text-gray-900 mb-2">Client Code</p>
+                        {#if client.client_code}
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <span class="font-mono text-sm bg-white px-3 py-1 border border-gray-300 rounded-md">{client.client_code}</span>
+                                </div>
+                                <div class="flex space-x-2">
+                                    <button 
+                                        on:click={copyClientCode} 
+                                        class="inline-flex items-center px-2.5 py-1.5 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                        </svg>
+                                        Copy
+                                    </button>
+                                    <button 
+                                        on:click={regenerateClientCode} 
+                                        class="inline-flex items-center px-2.5 py-1.5 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        Regenerate
+                                    </button>
+                                </div>
+                            </div>
+                        {:else}
+                            <button 
+                                on:click={generateClientCode} 
+                                class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                                Generate Client Code
+                            </button>
+                        {/if}
+                    </div>
+                    
+                    <div class="bg-gray-50 p-4 rounded-lg shadow-sm">
+                        <p class="text-sm font-medium text-gray-900 mb-2">Invite to Portal</p>
+                        <div class="flex items-center">
+                            <button 
+                                on:click={sendPortalInvite} 
+                                disabled={!client.client_code || !client.email}
+                                class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2v-7a2 2 0 00-2-2H5a2 2 0 00-2 2v7a2 2 0 002 2z" />
+                                </svg>
+                                Send Invitation Email
+                            </button>
+                        </div>
+                        {#if !client.email}
+                            <p class="text-xs text-red-500 mt-2">Client email is required to send an invitation</p>
+                        {/if}
+                    </div>
+                {:else}
+                    <div class="bg-gray-50 p-4 rounded-lg shadow-sm">
+                        <p class="text-sm font-medium text-gray-900 mb-2">Portal Access</p>
+                        <button 
+                            on:click={revokePortalAccess} 
+                            class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            Revoke Portal Access
+                        </button>
+                    </div>
+                {/if}
+                
+                {#if portalMessage}
+                    <div class="mt-4 rounded-md {portalMessageType === 'success' ? 'bg-green-50' : 'bg-red-50'} p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                {#if portalMessageType === 'success'}
+                                    <svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                    </svg>
+                                {:else}
+                                    <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                                    </svg>
+                                {/if}
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium {portalMessageType === 'success' ? 'text-green-800' : 'text-red-800'}">{portalMessage}</p>
+                            </div>
+                        </div>
+                    </div>
+                {/if}
+            </div>
+        {:else}
             <div class="text-center py-12 bg-white rounded-xl shadow-md">
                 <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -259,13 +395,21 @@
     let loading = false;
     let error: string | null = null;
 
-    type Client = Database['public']['Tables']['clients']['Row'];
+    // Update the Client type to include user_id and client_code fields
+    type Client = Database['public']['Tables']['clients']['Row'] & {
+        user_id?: string | null;
+        client_code?: string | null;
+    };
+    
     type Appointment = Database['public']['Tables']['appointments']['Row'] & {
         service_name?: string;
     };
 
     let client: Client | null = null;
     let appointments: Appointment[] = [];
+    let portalMessage = '';
+    let portalMessageType: 'success' | 'error' = 'success';
+    let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
     onMount(async () => {
         await Promise.all([
@@ -385,5 +529,133 @@
 
     function scheduleAppointment() {
         goto(`/appointments?client=${$page.params.id}&autoOpen=true`);
+    }
+
+    // Client Portal Functions
+    async function generateClientCode() {
+        try {
+            // Generate a random 8-character alphanumeric code
+            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let code = '';
+            for (let i = 0; i < 8; i++) {
+                code += characters.charAt(Math.floor(Math.random() * characters.length));
+            }
+            
+            // Update the client with the new code
+            const { error: updateError } = await supabase
+                .from('clients')
+                .update({ client_code: code })
+                .eq('id', $page.params.id);
+                
+            if (updateError) throw updateError;
+            
+            // Reload the client data
+            await loadClient();
+            
+            portalMessage = 'Client code generated successfully';
+            portalMessageType = 'success';
+            
+            // Clear the message after 3 seconds
+            setTimeout(() => {
+                portalMessage = '';
+            }, 3000);
+            
+        } catch (e: any) {
+            portalMessage = e.message || 'Failed to generate client code';
+            portalMessageType = 'error';
+        }
+    }
+    
+    async function regenerateClientCode() {
+        // Just call the generate function again
+        await generateClientCode();
+    }
+    
+    function copyClientCode() {
+        if (client?.client_code) {
+            navigator.clipboard.writeText(client.client_code);
+            
+            // Show a message
+            portalMessage = 'Client code copied to clipboard';
+            portalMessageType = 'success';
+            
+            // Clear the message after 3 seconds
+            if (copyTimeout) clearTimeout(copyTimeout);
+            copyTimeout = setTimeout(() => {
+                portalMessage = '';
+            }, 3000);
+        }
+    }
+    
+    async function sendPortalInvite() {
+        try {
+            if (!client?.email || !client?.client_code) {
+                portalMessage = 'Client must have an email and client code';
+                portalMessageType = 'error';
+                return;
+            }
+            
+            // Generate the registration URL with the client code
+            const registrationUrl = `${window.location.origin}/client-portal/register?code=${client.client_code}`;
+            
+            // In a real app, you would send an email here
+            // For now, we'll just copy the URL to clipboard
+            navigator.clipboard.writeText(registrationUrl);
+            
+            portalMessage = 'Registration link copied to clipboard. Send this to your client.';
+            portalMessageType = 'success';
+            
+            // Clear the message after 5 seconds
+            setTimeout(() => {
+                portalMessage = '';
+            }, 5000);
+            
+        } catch (e: any) {
+            portalMessage = e.message || 'Failed to create invitation';
+            portalMessageType = 'error';
+        }
+    }
+    
+    async function revokePortalAccess() {
+        try {
+            if (!client?.user_id) {
+                portalMessage = 'Client does not have portal access';
+                portalMessageType = 'error';
+                return;
+            }
+            
+            // First, get the user ID to delete from auth
+            const userId = client.user_id;
+            
+            // Update the client to remove the user_id
+            const { error: updateError } = await supabase
+                .from('clients')
+                .update({ 
+                    user_id: null,
+                    client_code: null // Also clear the client code
+                })
+                .eq('id', $page.params.id);
+                
+            if (updateError) throw updateError;
+            
+            // In a real app with admin privileges, you might want to delete the user from auth as well
+            // This would require a server-side function with admin rights
+            // For now, we'll just disconnect the account
+            
+            // Reload the client data
+            await loadClient();
+            
+            portalMessage = 'Portal access revoked successfully';
+            portalMessageType = 'success';
+            
+            // Clear the message after 3 seconds
+            setTimeout(() => {
+                portalMessage = '';
+            }, 3000);
+            
+        } catch (e: any) {
+            portalMessage = e.message || 'Failed to revoke portal access';
+            portalMessageType = 'error';
+        }
     }
 </script>

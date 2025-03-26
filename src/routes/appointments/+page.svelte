@@ -499,26 +499,56 @@
             console.log('New start time:', newStartTime);
             console.log('New end time:', newEndTime);
 
-            // Convert the new times to full ISO format with timezone using Luxon
-            const updatedStart = DateTime.fromFormat(newStartTime, "yyyy-MM-dd'T'HH:mm", { zone: 'America/Denver' }).toUTC().toISO();
-            const updatedEnd = DateTime.fromFormat(newEndTime, "yyyy-MM-dd'T'HH:mm", { zone: 'America/Denver' }).toUTC().toISO();
+            // Ensure we have valid ISO format dates for Supabase
+            let updatedStart, updatedEnd;
+            
+            try {
+                // Try to parse and format as UTC ISO string
+                if (typeof newStartTime === 'string' && newStartTime) {
+                    // If it looks like an ISO string, ensure it's in full UTC format
+                    if (newStartTime.includes('T')) {
+                        updatedStart = DateTime.fromISO(newStartTime).toUTC().toISO();
+                    } else {
+                        // If not an ISO string, try to parse with format
+                        updatedStart = DateTime.fromFormat(newStartTime, "yyyy-MM-dd'T'HH:mm", { zone: 'America/Denver' }).toUTC().toISO();
+                    }
+                }
+                
+                if (typeof newEndTime === 'string' && newEndTime) {
+                    // If it looks like an ISO string, ensure it's in full UTC format
+                    if (newEndTime.includes('T')) {
+                        updatedEnd = DateTime.fromISO(newEndTime).toUTC().toISO();
+                    } else {
+                        // If not an ISO string, try to parse with format
+                        updatedEnd = DateTime.fromFormat(newEndTime, "yyyy-MM-dd'T'HH:mm", { zone: 'America/Denver' }).toUTC().toISO();
+                    }
+                }
+                
+                console.log('Formatted for database:', updatedStart, updatedEnd);
+                
+                const { error: updateError } = await supabase
+                    .from('appointments')
+                    .update({
+                        start_time: updatedStart,
+                        end_time: updatedEnd
+                    })
+                    .eq('id', appointment.id);
 
-            const { error: updateError } = await supabase
-                .from('appointments')
-                .update({
-                    start_time: updatedStart,
-                    end_time: updatedEnd
-                })
-                .eq('id', appointment.id);
-
-            if (updateError) throw updateError;
+                if (updateError) {
+                    console.error('Supabase update error:', updateError);
+                    throw updateError;
+                }
+            } catch (e: unknown) {
+                console.error('Error parsing dates:', e);
+                throw e;
+            }
 
             // Schedule a notification to show briefly and then hide it
             const appointmentIndex = appointments.findIndex(a => a.id === appointment.id);
             if (appointmentIndex !== -1) {
                 // Update the local copy
-                appointments[appointmentIndex].start_time = newStartTime;
-                appointments[appointmentIndex].end_time = newEndTime;
+                appointments[appointmentIndex].start_time = updatedStart;
+                appointments[appointmentIndex].end_time = updatedEnd;
                 appointments = [...appointments]; // Trigger reactivity
             }
             

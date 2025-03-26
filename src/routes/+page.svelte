@@ -140,6 +140,10 @@
         isSignIn = !isSignIn;
         error = null;
     }
+    
+    function goToClientPortal() {
+        goto('/client-portal/login');
+    }
 </script>
 
 <div class="min-h-screen relative flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -201,53 +205,41 @@
                 <div>
                     <label for="email" class="block text-sm font-medium text-gray-700">Email address</label>
                     <div class="mt-1">
-                        <input
-                            id="email"
-                            name="email"
-                            type="email"
-                            autocomplete="email"
-                            required
-                            bind:value={email}
-                            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            placeholder="you@example.com"
-                        />
+                        <input id="email" name="email" type="email" autocomplete="email" required bind:value={email} class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                     </div>
                 </div>
 
                 <div>
                     <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
                     <div class="mt-1">
-                        <input
-                            id="password"
-                            name="password"
-                            type="password"
-                            autocomplete={isSignIn ? "current-password" : "new-password"}
-                            required
-                            bind:value={password}
-                            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            placeholder="••••••••"
-                        />
+                        <input id="password" name="password" type="password" autocomplete="current-password" required bind:value={password} class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                     </div>
-                    {#if !isSignIn}
-                        <p class="mt-1 text-xs text-gray-500">Password must be at least 6 characters</p>
-                    {/if}
                 </div>
 
+                {#if isSignIn}
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm">
+                            <button type="button" on:click={() => isResettingPassword = true} class="font-medium text-indigo-600 hover:text-indigo-500">
+                                Forgot your password?
+                            </button>
+                        </div>
+                        <div class="text-sm">
+                            <button type="button" on:click={goToRegister} class="font-medium text-indigo-600 hover:text-indigo-500">
+                                Create account
+                            </button>
+                        </div>
+                    </div>
+                {/if}
+
                 <div>
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors duration-200"
-                    >
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" disabled={loading}>
                         {#if loading}
-                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            Processing...
-                        {:else}
-                            {isSignIn ? 'Sign in' : 'Create account'}
                         {/if}
+                        {loading ? 'Processing...' : (isSignIn ? 'Sign in' : 'Sign up')}
                     </button>
                 </div>
             </form>
@@ -258,88 +250,74 @@
                         <div class="w-full border-t border-gray-300"></div>
                     </div>
                     <div class="relative flex justify-center text-sm">
-                        <span class="px-2 bg-white text-gray-500">
-                            {isSignIn ? 'New to HairStyle Pro?' : 'Already have an account?'}
-                        </span>
+                        <span class="px-2 bg-white text-gray-500">{isResettingPassword ? 'Or sign in' : (isSignIn ? 'Or register' : 'Or sign in')}</span>
                     </div>
                 </div>
 
-                <div class="mt-6">
-                    <button
-                        type="button"
-                        on:click={isSignIn ? goToRegister : toggleView}
-                        class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                    >
-                        {isSignIn ? 'Create a new account' : 'Sign in to your account'}
-                    </button>
-                </div>
-                <div class="mt-6">
-                    <button
-                        type="button"
-                        on:click={() => isResettingPassword = true}
-                        class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                    >
-                        Forgot Password?
-                    </button>
-                </div>
-            </div>
-            {#if isResettingPassword}
-                <div class="mt-6">
-                    <form class="space-y-6" on:submit|preventDefault={handlePasswordReset}>
+                {#if isResettingPassword}
+                    <!-- Password Reset Form -->
+                    <div class="mt-6">
                         <div>
-                            <label for="email" class="block text-sm font-medium text-gray-700">Email address</label>
-                            <div class="mt-1">
-                                <input
-                                    id="email"
-                                    name="email"
-                                    type="email"
-                                    autocomplete="email"
-                                    required
-                                    bind:value={email}
-                                    class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                    placeholder="you@example.com"
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors duration-200"
-                            >
-                                {#if loading}
-                                    <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                    Processing...
-                                {:else}
-                                    Reset Password
-                                {/if}
+                            <button type="button" on:click={() => { isResettingPassword = false; }} class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Return to sign in
                             </button>
                         </div>
-                    </form>
+                        <div class="mt-4">
+                            <button type="button" on:click={handlePasswordReset} class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" disabled={loading}>
+                                {loading ? 'Sending...' : 'Reset password'}
+                            </button>
+                        </div>
+                    </div>
+                {:else if isSignIn}
+                    <!-- Register Button -->
+                    <div class="mt-6">
+                        <button type="button" on:click={toggleView} class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Create a new account
+                        </button>
+                    </div>
+                {:else}
+                    <!-- Sign In Button -->
+                    <div class="mt-6">
+                        <button type="button" on:click={toggleView} class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Sign in instead
+                        </button>
+                    </div>
+                {/if}
+            </div>
+            
+            <!-- Client Portal Section -->
+            <div class="mt-8 pt-6 border-t border-gray-200">
+                <div class="text-center">
+                    <h3 class="text-md font-medium text-gray-900">Are you a client?</h3>
+                    <p class="mt-1 text-sm text-gray-500">
+                        Access your appointments and profile through the client portal
+                    </p>
+                    <div class="mt-4">
+                        <button
+                            on:click={goToClientPortal}
+                            class="inline-flex items-center px-4 py-2 border border-indigo-300 text-sm font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        >
+                            <svg class="-ml-1 mr-2 h-5 w-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Go to Client Login
+                        </button>
+                    </div>
                 </div>
-            {/if}
+            </div>
 
             <div class="mt-8">
                 <div class="bg-indigo-50 rounded-md p-4">
                     <div class="flex">
                         <div class="flex-shrink-0">
                             <svg class="h-5 w-5 text-indigo-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
                             </svg>
                         </div>
                         <div class="ml-3">
-                            <h3 class="text-sm font-medium text-indigo-800">Why use HairStyle Pro?</h3>
-                            <div class="mt-2 text-xs text-indigo-700">
-                                <ul class="list-disc pl-5 space-y-1">
-                                    <li>Easily manage client appointments</li>
-                                    <li>Track your services and pricing</li>
-                                    <li>Create beautiful style guides</li>
-                                    <li>Grow your business with powerful tools</li>
-                                </ul>
+                            <h3 class="text-sm font-medium text-indigo-800">Need help?</h3>
+                            <div class="mt-2 text-sm text-indigo-700">
+                                <p>If you're having trouble accessing your account, please contact support at <a href="mailto:support@hairstylepro.com" class="font-bold underline">support@hairstylepro.com</a></p>
                             </div>
                         </div>
                     </div>

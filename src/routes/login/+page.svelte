@@ -38,6 +38,10 @@
   function goToRegister() {
     goto('/register');
   }
+
+  function goToClientPortal() {
+    goto('/client-portal/login');
+  }
 </script>
 
 <div class="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -125,6 +129,27 @@
           </button>
         </div>
       </form>
+
+      <!-- Client Portal Section -->
+      <div class="mt-8 pt-6 border-t border-gray-200">
+        <div class="text-center">
+          <h3 class="text-md font-medium text-gray-900">Are you a client?</h3>
+          <p class="mt-1 text-sm text-gray-500">
+            Access your appointments and profile through the client portal
+          </p>
+          <div class="mt-4">
+            <button
+              on:click={goToClientPortal}
+              class="inline-flex items-center px-4 py-2 border border-indigo-300 text-sm font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              <svg class="-ml-1 mr-2 h-5 w-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Go to Client Login
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

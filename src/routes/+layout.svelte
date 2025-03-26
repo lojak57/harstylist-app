@@ -10,7 +10,11 @@
                       $page.url.pathname.includes('/test-auth') || 
                       $page.url.pathname.includes('/confirm-email') || 
                       $page.url.pathname.includes('/login') || 
-                      $page.url.pathname.includes('/register');
+                      $page.url.pathname.includes('/register') ||
+                      $page.url.pathname.includes('/client-portal/login') ||
+                      $page.url.pathname.includes('/client-portal/register') ||
+                      $page.url.pathname.includes('/client-portal/create-account') ||
+                      $page.url.pathname.includes('/client-portal/reset-password');
 </script>
 
 {#if isPublicPage}
